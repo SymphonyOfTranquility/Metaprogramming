@@ -1,0 +1,21 @@
+tokens = {
+    "whitespace": (' ', '\t', '\n'),
+    "comment": ('//', '/* */', '#!'),
+    "keyword": ('await', 'break', 'case', 'catch', 'class', 'const', 'continue', 'debugger', 'default', 'delete', 'do',
+                'else', 'enum', 'export', 'extends', 'finally', 'for', 'function', 'if', 'import', 'implements', 'in',
+                'instanceof', 'interface', 'let', 'new', 'package', 'private', 'protected', 'public', 'return',
+                'static', 'super', 'switch', 'this', 'throw', 'try', 'typeof', 'var', 'void', 'while', 'with', 'yield'),
+    "const_literal": ('null', 'true', 'false'),
+    "number_literal": ('decimal_int', 'decimal_float', "binary", 'octal', 'hexadecimal', 'bigint'),
+    "string_literal": ('\'\'', '""', '``'),
+    "operator": ('=',
+                 '?', ':',
+                 '||', '&&', '|', '^', '&',
+                 '==', '!=', '===', '!==',
+                 '<', '<=', '>=', '>',
+                 '<<', '>>', '>>>',
+                 '+', '-', '*', '/', '%',
+                 '!', '~', '++', '--',
+                 '.'),
+    "punctuation": (';', ',', '[', ']', '{', '}', '(', ')')
+}
