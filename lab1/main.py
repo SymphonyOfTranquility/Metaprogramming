@@ -1,15 +1,14 @@
-# This is a sample Python script.
-
-# Press Shift+F10 to execute it or replace it with your code.
-# Press Double Shift to search everywhere for classes, files, tool windows, actions, and settings.
-
-
-def print_hi(name):
-    # Use a breakpoint in the code line below to debug your script.
-    print(f'Hi, {name}')  # Press Ctrl+8 to toggle the breakpoint.
+from Lexer import Lexer
+from DictTokenTypes import Tokens
+from CharChecks import *
 
 
-# Press the green button in the gutter to run the script.
+def d(func):
+    print(func('3'))
+
+
 if __name__ == '__main__':
-    print_hi('PyCharm')
+    lexer = Lexer()
+    lexer.get_all_tokens('code.js')
+    lexer.print_all()
 
