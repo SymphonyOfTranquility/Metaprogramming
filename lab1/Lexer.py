@@ -53,6 +53,15 @@ class Lexer:
             else:
                 print(path_to_file, '- some other error')
 
+    def get_tokens_list(self):
+        return self._token
+
+    def get_error_tokens_list(self):
+        return self._invalid_token
+
+    def get_symbol_table(self):
+        return self._symbol_table
+
     def _check_multi_line_mode(self, state):
         if state.multi_line_mode:
             if state.token.type == Tokens.MultiLineComment:
