@@ -6,12 +6,19 @@ from TokenClasses import Token, WrongToken
 
 
 class _CurrentLineState:
+    all_lines = []
+
     def __init__(self):
         self.column = 0
         self.row = 0
         self.line = ""
         self.token = Token(token_type=Tokens.Invalid)
         self.multi_line_mode = False
+
+    def copy(self, instance):
+        self.row = instance.row
+        self.column = instance.column
+        self.line = instance.line
 
 
 class Lexer:
@@ -25,21 +32,19 @@ class Lexer:
         try:
             f = open(path_to_file, "r")
             state = _CurrentLineState()
+            all_lines = [line for line in f]
+            _CurrentLineState.all_lines = all_lines
 
-            for line in f:
-                state.line = line
+            while state.row < len(all_lines):
+                state.line = all_lines[state.row]
                 state.column = 0
                 while state.column < len(state.line):
                     self._get_next_token(state)
                 state.row += 1
+            state.row -= 1
+            state.column -= 1
+            self._check_multi_line_mode(state)
 
-            if state.multi_line_mode:
-                if state.token.type == Tokens.MultiLineComment:
-                    self._invalid_token.append(WrongToken(message="Multi line comment requires end",
-                                                          token=state.token))
-                if state.token.type == Tokens.StringLiteral:
-                    self._invalid_token.append(WrongToken(message="String literal requires the end",
-                                                          token=state.token))
         except IOError as x:
             if x.errno == errno.ENOENT:
                 print(path_to_file, '- does not exist')
@@ -48,12 +53,27 @@ class Lexer:
             else:
                 print(path_to_file, '- some other error')
 
+    def _check_multi_line_mode(self, state):
+        if state.multi_line_mode:
+            if state.token.type == Tokens.MultiLineComment:
+                self._invalid_token.append(WrongToken(message="Multi line comment requires end",
+                                                      token=state.token))
+            if state.token.type == Tokens.StringLiteral and state.token.spec != '`':
+                self._invalid_token.append(WrongToken(message="String literal requires the end",
+                                                      token=state.token))
+            if state.token.type == Tokens.StringLiteral and state.token.spec == '`':
+                self._token.append(Token(token_type=Tokens.EndTemplateString,
+                                         row=state.row,
+                                         column=state.column))
+                self._invalid_token.append(WrongToken(message="String literal requires the end",
+                                                      token=self._token[-1]))
+
     def print_all(self):
         for tok in self._token:
             if tok.type != Tokens.Space and tok.type != Tokens.Tab:
                 print(tok, end=' ')
                 if tok.index is not None:
-                    print(self._symbol_table[tok.index])
+                    print('|' + self._symbol_table[tok.index] + '|')
                 else:
                     print('')
             if tok.type == Tokens.Enter:
@@ -62,13 +82,13 @@ class Lexer:
         for tok in self._invalid_token:
             print(tok, end=' ')
             if tok.token.index is not None:
-                print(self._symbol_table[tok.token.index])
+                print('|' + self._symbol_table[tok.token.index] + '|')
             else:
                 print('')
 
         print('------------------------')
         for i in range(len(self._symbol_table)):
-            print(str(i) + ') ', self._symbol_table[i])
+            print(str(i) + ') ', '|' + self._symbol_table[i] + '|')
 
     def _get_next_token(self, state):
         if state.multi_line_mode:
@@ -306,7 +326,6 @@ class Lexer:
                 break
 
             elif is_down_dash(current_symbol):
-                was_dash = True
                 last_dash = True
                 new_number += current_symbol
 
@@ -340,7 +359,6 @@ class Lexer:
                         was_e = True
                         break
                     elif is_down_dash(current_symbol):
-                        was_dash = True
                         last_dash = True
                         new_number += current_symbol
 
@@ -374,7 +392,6 @@ class Lexer:
                         last_dash = False
 
                     elif is_down_dash(current_symbol):
-                        was_dash = True
                         last_dash = True
                         new_number += current_symbol
 
@@ -530,6 +547,8 @@ class Lexer:
             self._handle_multi_line_comment(state)
         elif state.token.type == Tokens.StringLiteral and state.token.spec in '\'"':
             self._handle_common_string(state)
+        elif state.token.type == Tokens.StringLiteral and state.token.spec == '`':
+            self._handle_template_string(state)
         else:
             state.multi_line_mode = False
 
@@ -537,7 +556,7 @@ class Lexer:
         self._add_correct_token(token_type=Tokens.StringLiteral,
                                 row=state.row,
                                 column=state.column,
-                                lit_value=state.line[state.column],
+                                lit_value="",
                                 token_spec=state.line[state.column])
         state.token = self._token[-1]
         state.multi_line_mode = True
@@ -550,7 +569,7 @@ class Lexer:
             temp_s = state.line[st:]
             pos = temp_s.find(ending)
             if pos == -1:
-                if state.line[-2] == '\\':
+                if len(state.line) >= 2 and state.line[-2] == '\\':
                     slash_pos = len(state.line)-2
                     while slash_pos >= state.column and state.line[slash_pos] == '\\':
                         slash_pos -= 1
@@ -580,8 +599,124 @@ class Lexer:
                         st += 1
                         continue
 
-                string_lit = state.line[state.column:st+1]
+                string_lit = state.line[state.column:st]
                 self._symbol_table[state.token.index] += string_lit
+                state.column = st + 1
+                state.token = None
+                state.multi_line_mode = False
+                return
+
+    def _init_template_string(self, state):
+        self._token.append(Token(token_type=Tokens.StartTemplateString,
+                                 row=state.row,
+                                 column=state.column))
+        self._add_correct_token(token_type=Tokens.StringLiteral,
+                                row=state.row,
+                                column=state.column,
+                                lit_value="",
+                                token_spec=state.line[state.column])
+        state.token = self._token[-1]
+        state.multi_line_mode = True
+        state.column += 1
+
+    def _get_next_token_interpolate(self, state):
+        current_symbol = state.line[state.column]
+        if not state.multi_line_mode and current_symbol == Tokens.InterpolationEnd.value:
+            self._token.append(Token(token_type=Tokens.InterpolationEnd,
+                                     row=state.row,
+                                     column=state.column))
+            return True
+        else:
+            self._get_next_token(state)
+            return False
+
+    def _interpolate(self, state):
+
+        self._token.append(Token(token_type=Tokens.InterpolationStart,
+                                 row=state.row,
+                                 column=state.column))
+        state.column += 2
+
+        while state.row < len(state.all_lines):
+            state.line = state.all_lines[state.row]
+            while state.column < len(state.line):
+                if self._get_next_token_interpolate(state):
+                    return
+            state.column = 0
+            state.row += 1
+        state.row -= 1
+        state.column = len(state.all_lines[-1])-1
+        self._check_multi_line_mode(state)
+
+        self._token.append(Token(token_type=Tokens.InterpolationEnd,
+                                 row=state.row,
+                                 column=state.column))
+        self._invalid_token.append(WrongToken(message="There was no end for interpolation",
+                                              token=self._token[-1]))
+
+    def _check_interpolation(self, state, start, end):
+        line_slice = state.line[start:end]
+        symbols = "${"
+        pos = line_slice.find(symbols)
+        if pos == -1:
+            return False
+        string_literal = state.line[state.column:state.column + pos]
+        state.column += pos
+        self._symbol_table[state.token.index] += string_literal
+        new_state = _CurrentLineState()
+        new_state.copy(state)
+        self._interpolate(new_state)
+        state.copy(new_state)
+
+        self._add_correct_token(token_type=Tokens.StringLiteral,
+                                row=state.row,
+                                column=state.column,
+                                lit_value='',
+                                token_spec='`')
+        state.token = self._token[-1]
+        state.column += 1
+        return True
+
+    def _handle_template_string(self, state):
+        st = state.column
+        ending = state.token.spec
+        while st < len(state.line):
+            temp_s = state.line[st:]
+            pos = temp_s.find(ending)
+            if pos == -1:
+                if self._check_interpolation(state, state.column, len(state.line)):
+                    return
+                if len(state.line) >= 2 and state.line[-2] == '\\':
+                    slash_pos = len(state.line) - 2
+                    while slash_pos >= state.column and state.line[slash_pos] == '\\':
+                        slash_pos -= 1
+                    if (len(state.line) - 2 - slash_pos) % 2 == 1:
+                        string_lit = state.line[state.column:-2]
+                        self._symbol_table[state.token.index] += string_lit
+                        state.column = len(state.line)
+                        return
+
+                string_lit = state.line[state.column:]
+                self._symbol_table[state.token.index] += string_lit
+                state.column = len(state.line)
+                return
+            else:
+                st += pos
+                if self._check_interpolation(state, state.column, st):
+                    return
+                if st-1 >= state.column and state.line[st - 1] == '\\':
+                    slash_pos = st - 1
+                    while slash_pos >= state.column and state.line[slash_pos] == '\\':
+                        slash_pos -= 1
+                    if (st - 1 - slash_pos) % 2 == 1:
+                        st += 1
+                        continue
+
+                string_lit = state.line[state.column:st]
+                self._symbol_table[state.token.index] += string_lit
+                self._token.append(Token(token_type=Tokens.EndTemplateString,
+                                         row=state.row,
+                                         column=st))
                 state.column = st + 1
                 state.token = None
                 state.multi_line_mode = False
@@ -591,5 +726,4 @@ class Lexer:
         if state.line[state.column] in '\'"':
             self._init_common_string(state)
         else:
-            state.line += 1
-            # self._init_template_string(state)
+            self._init_template_string(state)

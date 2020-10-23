@@ -1,52 +1,3 @@
-tokens = {
-    "whitespace": (' ', '\t', '\n'),
-    "comment": ('//', '/* */', '#!'),
-    "keyword": ('await', 'break', 'case', 'catch', 'class', 'const', 'continue', 'debugger', 'default', 'delete', 'do',
-                'else', 'enum', 'export', 'extends', 'finally', 'for', 'function', 'if', 'import', 'implements', 'in',
-                'instanceof', 'interface', 'let', 'new', 'package', 'private', 'protected', 'public', 'return',
-                'static', 'super', 'switch', 'this', 'throw', 'try', 'typeof', 'var', 'void', 'while', 'with', 'yield'),
-    "const_literal": ('null', 'true', 'false'),
-    "number_literal": ('decimal_int', 'decimal_float', "binary", 'octal', 'hexadecimal', 'bigint'),
-    "string_literal": ('\'\'', '""', '``'),
-    "operator": ('=',
-                 '?', ':',
-                 '||', '&&', '|', '^', '&',
-                 '==', '!=', '===', '!==',
-                 '<', '<=', '>=', '>',
-                 '<<', '>>', '>>>',
-                 '+', '-', '*', '/', '%',
-                 '!', '~', '++', '--',
-                 '.'),
-    "punctuation": (';', ',', '[', ']', '{', '}', '(', ')'),
-    "identifier": 'identifier',
-    "invalid": 'invalid'
-}
-
-token_names = {
-    "whitespace": ('space', 'tab', 'new_line'),
-    "comment": ('single_line_comment', 'multi_line_comment'),
-    "keyword": ('await', 'break', 'case', 'catch', 'class', 'const', 'continue', 'debugger', 'default', 'delete', 'do',
-                'else', 'enum', 'export', 'extends', 'finally', 'for', 'function', 'if', 'import', 'implements', 'in',
-                'instanceof', 'interface', 'let', 'new', 'package', 'private', 'protected', 'public', 'return',
-                'static', 'super', 'switch', 'this', 'throw', 'try', 'typeof', 'var', 'void', 'while', 'with', 'yield'),
-    "const_literal": ('null', 'true', 'false'),
-    "number_literal": ('decimal_int', 'decimal_float', "binary", 'octal', 'hexadecimal', 'bigint'),
-    "string_literal": ('single_quote', 'double_quote', 'single_other_quote'),
-    "operator": ('assignment',
-                 'quest_mark', 'colon',
-                 'or_symb', 'and_symb', 'or_bitwise', 'xor_bitwise', 'and_bitwise',
-                 'equal', 'not_equal', 'identical', 'not_identical',
-                 '<', '<=', '>=', '>',
-                 '<<', '>>', '>>>',
-                 '+', '-', '*', '/', '%',
-                 '!', '~', '++', '--',
-                 '.'),
-    "punctuation": (';', ',', '[', ']', '{', '}', '(', ')'),
-    "identifier": 'identifier',
-    "invalid": 'invalid'
-}
-
-
 from enum import Enum
 
 
@@ -69,6 +20,10 @@ class Tokens(Enum):
                      'B_decimal_int', 'B_binary', 'B_octal', 'B_hexadecimal')
     Identifier = 'identifier'
     StringLiteral = ('\'', '"', '`')
+    StartTemplateString = 'start `'
+    EndTemplateString = 'end `'
+    InterpolationStart = '${'
+    InterpolationEnd = '}'
 
     OpAdd = '+'
     OpSub = '-'
@@ -130,3 +85,4 @@ class Tokens(Enum):
                  )
 
     Invalid = 'Invalid'
+    Interpolation = 'Interpolation'
