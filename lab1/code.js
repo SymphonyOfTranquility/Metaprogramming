@@ -1,3 +1,20 @@
+foo(
+	                "demo",
+        {
+            title: "Demo",
+            width: 100
+        },
+
+        function () {
+            object.firstCall({
+                        a: 'a',
+                        b: 'b'
+                    },
+                    123)
+            .secondCall();
+        }
+);
+
 aasdki  //ewok ofiuew
 ekwoei12038uew0d+_EW_EW_r09090uwefh9 /*  :DL
 12039-ie9r849ufhe0r9049e0-0flk9t4904ie0 wkrf
@@ -28,3 +45,6 @@ oiii` +mk } `
 0015_43n    122 123.e-12
 
 12.e 34.e+ 56.e+1 56_.e+1_2 7_8.e+1 + "_2 \
+
+
+1278a + b

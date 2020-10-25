@@ -28,7 +28,7 @@ class Lexer:
         self._token = []
         self._invalid_token = []
 
-    def get_all_tokens(self, path_to_file):
+    def process_js_file(self, path_to_file):
         try:
             f = open(path_to_file, "r")
             state = _CurrentLineState()
@@ -133,6 +133,10 @@ class Lexer:
             self._handle_operation(state)
             return
 
+        if is_punctuation(current_symbol):
+            self._handle_punctuation(state)
+            return
+
         self._add_wrong_token(token_type=Tokens.Invalid,
                               row=state.row,
                               column=state.column,
@@ -158,6 +162,14 @@ class Lexer:
             else:
                 break
             state.column += 1
+
+    def _handle_punctuation(self, state):
+        current_symbol = state.line[state.column]
+        self._token.append(Token(token_type=Tokens.Punctuation,
+                                 row=state.row,
+                                 column=state.column,
+                                 spec=current_symbol))
+        state.column += 1
 
     def _add_wrong_token(self, token_type, row, column, lit_value, error_message):
         self._token.append(Token(token_type=token_type,
@@ -277,11 +289,10 @@ class Lexer:
 
         if is_dot(current_symbol):
             if state.column + 1 >= len(state.line) or not is_number(state.line[state.column + 1]):
-                self._add_wrong_token(token_type=Tokens.NumberLiteral,
-                                      row=state.row,
-                                      column=state.column,
-                                      lit_value=current_symbol,
-                                      error_message="Unexpected symbol")
+                self._token.append(Token(token_type=Tokens.Punctuation,
+                                         row=state.row,
+                                         column=state.column,
+                                         spec=current_symbol))
                 state.column += 1
                 return
 
@@ -565,7 +576,7 @@ class Lexer:
         self._add_correct_token(token_type=Tokens.StringLiteral,
                                 row=state.row,
                                 column=state.column,
-                                lit_value="",
+                                lit_value=state.line[state.column],
                                 token_spec=state.line[state.column])
         state.token = self._token[-1]
         state.multi_line_mode = True
@@ -583,7 +594,7 @@ class Lexer:
                     while slash_pos >= state.column and state.line[slash_pos] == '\\':
                         slash_pos -= 1
                     if (len(state.line) - 2 - slash_pos) % 2 == 1:
-                        string_lit = state.line[state.column:-2]
+                        string_lit = state.line[state.column:]
                         self._symbol_table[state.token.index] += string_lit
                         state.column = len(state.line)
                         return
@@ -608,7 +619,7 @@ class Lexer:
                         st += 1
                         continue
 
-                string_lit = state.line[state.column:st]
+                string_lit = state.line[state.column:st+1]
                 self._symbol_table[state.token.index] += string_lit
                 state.column = st + 1
                 state.token = None
@@ -700,7 +711,7 @@ class Lexer:
                     while slash_pos >= state.column and state.line[slash_pos] == '\\':
                         slash_pos -= 1
                     if (len(state.line) - 2 - slash_pos) % 2 == 1:
-                        string_lit = state.line[state.column:-2]
+                        string_lit = state.line[state.column:]
                         self._symbol_table[state.token.index] += string_lit
                         state.column = len(state.line)
                         return

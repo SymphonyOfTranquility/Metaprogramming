@@ -2,7 +2,6 @@
   "Tabs and Indents" :
   {
     "Use tab character": false,
-    "Smart tabs" : false,
     "Tab size" : 4,
     "Indent" : 4,
     "Continuation indent" : 4,

@@ -2,6 +2,7 @@ from enum import Enum
 
 
 class Tokens(Enum):
+    WhiteSpace = 'WhiteSpace'
     Space = ' '
     Tab = '\t'
     Enter = '\n'
@@ -25,57 +26,7 @@ class Tokens(Enum):
     InterpolationStart = '${'
     InterpolationEnd = '}'
 
-    OpAdd = '+'
-    OpSub = '-'
-    OpMulti = '*'
-    OpDiv = '/'
-    OpMod = '%'
-    OpIncrement = '++'
-    OpDecrement = '--'
-    OpExp = '**'
-
-    OpEqual = '=='
-    OpIdentical = '==='
-    OpNotEqual = '!='
-    OpNotIdentical = '!=='
-    OpGreaterThan = '>'
-    OpLessThan = '<'
-    OpGreaterThanEqual = '>='
-    OpLessThanEqual = '<='
-
-    # logic
-    OpBitwiseAnd = '&'
-    OpBitwiseOr = '|'
-    OpBitwiseXor = '^'
-    OpBitwiseNot = '~'
-
-    OpLeftShift = '<<'
-    OpRightShift = '>>'
-    OpZeroFillRight = '>>>'
-
-    OpAndSymb = '&&'
-    OpOrSymb = '||'
-    OpNot = '!'
-
-    # assignment
-    OpAssignment = '='
-    OpAddAssignment = '+='
-    OpSubAssignment = '-='
-    OpMultiAssignment = '*='
-    OpDivAssignment = '/='
-    OpModAssignment = '%='
-    OpExpAssignment = '**='
-
-    OpBitwiseAndAssignment = '&='
-    OpBitwiseOrAssignment = '|='
-    OpBitwiseXorAssignment = '^='
-    OpLeftShiftAssignment = '<<='
-    OpRightShiftAssignment = '>>='
-    OpZeroFillRightAssignment = '>>>='
-
-    # conditional assignment
-    OpQuestMark = '?'
-    OpColon = ':'
+    Punctuation = ('[', ']', '(', ')', '{', '}', '.', ';', ',')
 
     Operators = ('+', '-', '*', '/', '%', '++', '--', '**',
                  '==', '===', '!=', '!==', '>', '<', '>=', '<=',
