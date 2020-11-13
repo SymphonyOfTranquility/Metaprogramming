@@ -24,11 +24,11 @@ class Token:
         if self.spec is not None:
             ans += (' ( ' + self.spec + ' ) ').ljust(20)
         if self.row is not None:
-            ans += '|' + str(self.row) + '|'
+            ans += '|' + (str(self.row)).rjust(2) + '|'
         if self.column is not None:
-            ans += (str(self.column) + '|').ljust(8)
-        if self.index is not None:
-            ans += str(self.index) + ') '
+            ans += (str(self.column)).ljust(2) + ('|').ljust(10)
+        # if self.index is not None:
+        #     ans += str(self.index) + ') '
         return ans
 
 
@@ -39,4 +39,4 @@ class WrongToken:
         self.token = token
 
     def __str__(self):
-        return self.error_message.ljust(40) + '|' + str(self.token)
+        return str(self.token) + ' | ' + self.error_message.ljust(100)
