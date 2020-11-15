@@ -962,6 +962,8 @@ class JsFormatter:
 
         if current_token.spec == 'function':
             self._handle_function_creation(state)
+        elif current_token.spec == 'yield':
+            self._handle_yield(state)
         elif current_token.spec == 'async':
             self._handle_async(state)
         elif current_token.spec == 'if':
@@ -1173,6 +1175,76 @@ class JsFormatter:
             self._handle_bkt(state, space_number, error_text, finish_parentheses, current_token,
                              _MAX_BLANK_LINES, Scope.GeneralBrace, '}')
         else:
+            return
+
+    def _handle_yield(self, state):
+
+        where = Scope.FuncDeclaration
+
+        self._token.append(state.all_tokens[state.pos])
+        prev_token = state.all_tokens[state.pos]
+
+        declaration_start = state.pos
+        current_token = self._get_next_token(state)
+        if current_token.is_fake():
+            return
+
+        was_star = False
+        if current_token.type == Tokens.Operators and current_token.spec == '*':
+            was_star = True
+
+            space_number, error_text = self._get_check_tokens_result(state, prev_token, current_token, where)
+
+            state.pos += 1
+            self._handle_whitespace_between_tokens(
+                state,
+                self._rule_whitespace(space_number=space_number,
+                                      enter_number=(-1, -1),
+                                      error_message=error_text,
+                                      error_blank=ERROR_SIZE + " after token"))
+            declaration_start = state.pos
+            self._token.append(state.all_tokens[state.pos])
+            prev_token = state.all_tokens[state.pos]
+
+            current_token = self._get_next_token(state)
+            if current_token.is_fake():
+                return
+
+        was_identifier = False
+        if current_token.type == Tokens.Identifier:
+            was_identifier = True
+            space_number, error_text = self._get_check_tokens_result(state, prev_token, current_token, where)
+            if was_star:
+                enter_number = (-1, -1)
+            else:
+                enter_number = (-1, _MAX_BLANK_LINES)
+
+            state.pos += 1
+            self._handle_whitespace_between_tokens(
+                state,
+                self._rule_whitespace(space_number=space_number,
+                                      enter_number=enter_number,
+                                      error_message=error_text,
+                                      error_blank=ERROR_SIZE + " after token"))
+            declaration_start = state.pos
+            self._token.append(state.all_tokens[state.pos])
+            prev_token = state.all_tokens[state.pos]
+
+            current_token = self._get_next_token(state)
+            if current_token.is_fake():
+                return
+
+        if current_token.type == Tokens.Punctuation and current_token.spec == '(':
+            if not was_identifier:
+                where = Scope.FuncExpression
+
+            space_number, error_text = self._get_check_tokens_result(state, prev_token, current_token, where)
+            self._handle_bkt(state, space_number, error_text, declaration_start, current_token,
+                             _MAX_BLANK_LINES, where, ')')
+        else:
+            return
+
+        if state.pos >= len(state.all_tokens):
             return
 
     def _handle_async(self, state):
