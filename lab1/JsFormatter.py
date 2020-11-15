@@ -87,7 +87,7 @@ class JsFormatter:
         if current_token.type == Tokens.Keyword:
             self._handle_keywords(state, where)
         elif current_token.type == Tokens.Identifier:
-            self._handle_identifier_cases(state)
+            self._handle_identifier_cases(state, where)
         elif current_token.type == Tokens.Operators:
             self._handle_operators(state)
         elif current_token.type == Tokens.Punctuation:
@@ -112,6 +112,8 @@ class JsFormatter:
             else:
                 break
             state.pos += 1
+        # if counter[Tokens.Space] == counter[Tokens.Enter] == counter[Tokens.Tab]:
+        #     state.pos += 1
         return counter
 
     def _get_prev_non_whitespace(self, state):
@@ -977,7 +979,7 @@ class JsFormatter:
         else:
             self._token.append(state.all_tokens[state.pos])
 
-    def _handle_identifier_cases(self, state):
+    def _handle_identifier_cases(self, state, where):
 
         self._token.append(state.all_tokens[state.pos])
         prev_token = state.all_tokens[state.pos]
@@ -996,12 +998,52 @@ class JsFormatter:
                              _MAX_BLANK_LINES, where, ')')
         elif current_token.type == Tokens.Punctuation and current_token.spec == '[':
             where = Scope.IndexAccessBrackets
-            prev_outer_scope = state.outer_scope
-            state.outer_scope = where
             space_number, error_text = self._get_check_tokens_result(state, prev_token, current_token, where)
 
-            self._handle_bkt(state, 0, error_text, declaration_start, current_token,
-                             _MAX_BLANK_LINES, where, ']')
+            state.pos += 1
+
+            self._handle_whitespace_between_tokens(
+                state,
+                self._rule_whitespace(space_number=0,
+                                      enter_number=(-1, _MAX_BLANK_LINES),
+                                      error_message=error_text,
+                                      error_blank=ERROR_SIZE + RULE_BLANK_MAX))
+
+            self._token.append(state.all_tokens[state.pos])
+            prev_token = state.all_tokens[state.pos]
+            current_token = self._get_next_token(state)
+            if current_token.is_fake():
+                return
+
+
+            space_number, error_text = self._get_check_tokens_result(state, prev_token, current_token, where)
+            state.pos += 1
+            self._handle_whitespace_between_tokens(
+                state,
+                self._rule_whitespace(space_number=space_number,
+                                      enter_number=(-1, _MAX_BLANK_LINES),
+                                      error_message=error_text,
+                                      error_blank=ERROR_SIZE + RULE_BLANK_MAX))
+
+            prev_outer_scope = state.outer_scope
+            state.outer_scope = where
+
+            current_token = self._get_next_token(state)
+            if current_token.is_fake():
+                return
+
+            first_open = False
+            while state.pos < len(state.all_tokens):
+                current_token = state.all_tokens[state.pos]
+                if current_token.spec == ']':
+                    self._token.append(state.all_tokens[state.pos])
+                    break
+                else:
+                    if current_token.spec == '[' and not first_open or self._get_next_token(state, False).spec == ']':
+                        self._parse_next_token(state, where)
+                        first_open = True
+                    else:
+                        self._parse_next_token(state, Scope.GeneralBrace)
             state.outer_scope = prev_outer_scope
 
     def _handle_punctuation(self, state, where):
