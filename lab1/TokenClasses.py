@@ -14,6 +14,10 @@ class Token:
         self.index = self.row = self.column = self.spec = None
         self.type = Tokens.Invalid
 
+    def is_fake(self):
+        return self.type is None and self.spec is None and \
+               self.index is None and self.row is None and self.column is None
+
     def __str__(self):
         ans = ''
         if self.type is not None:

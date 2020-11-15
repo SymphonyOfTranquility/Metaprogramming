@@ -289,11 +289,19 @@ class Lexer:
 
         if is_dot(current_symbol):
             if state.column + 1 >= len(state.line) or not is_number(state.line[state.column + 1]):
-                self._token.append(Token(token_type=Tokens.Punctuation,
-                                         row=state.row,
-                                         column=state.column,
-                                         spec=current_symbol))
-                state.column += 1
+                if is_dot(state.line[state.column + 1]) and \
+                          state.column + 2 < len(state.line) and is_dot(state.line[state.column + 2]):
+                    self._token.append(Token(token_type=Tokens.Operators,
+                                             spec='...',
+                                             row=state.row,
+                                             column=state.column))
+                    state.column += 3
+                else:
+                    self._token.append(Token(token_type=Tokens.Punctuation,
+                                             row=state.row,
+                                             column=state.column,
+                                             spec=current_symbol))
+                    state.column += 1
                 return
 
         if current_symbol == '0' and state.column + 1 < len(state.line) and \
