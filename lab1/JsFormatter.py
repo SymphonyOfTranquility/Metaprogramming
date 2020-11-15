@@ -1644,7 +1644,7 @@ def _check_rec(my_path, conf_name, action_type):
 if __name__ == '__main__':
     if os.path.exists("log.txt"):
         os.remove("log.txt")
-    if sys.argv[1] in ('-h', '--help'):
+    if sys.argv[1] == '-h' or sys.argv[1] == '--help':
         print("Basic commands:")
         print("\t-h, --help\t\t\t\t: help menu")
         print("\t-v, --verify template file -(p|d|f) /..\t: verify your files(as output log.txt file);")
