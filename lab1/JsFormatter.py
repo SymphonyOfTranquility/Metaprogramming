@@ -1,5 +1,8 @@
-import json
 import sys
+import os
+from os import listdir
+from os.path import isfile, join, splitext
+import json
 from enum import Enum
 
 from Lexer import Lexer
@@ -90,7 +93,10 @@ class JsFormatter:
             self._token.append(current_token)
 
         if state.pos < len(state.all_tokens) and not handle_indent:
-            self._check_space_to_next_token(state, where)
+            if where == Scope.Switch and current_token.spec == ':':
+                self._check_space_to_next_token(state, where, (0, _MAX_BLANK_LINES))
+            else:
+                self._check_space_to_next_token(state, where)
 
         if was_comma:
             state.continuous_indent = max(state.continuous_indent - 1, 0)
@@ -116,7 +122,7 @@ class JsFormatter:
             start_pos -= 1
         return counter
 
-    def _check_space_to_next_token(self, state, where, enter_number=(0, _MAX_BLANK_LINES)):
+    def _check_space_to_next_token(self, state, where, enter_number=(-1, _MAX_BLANK_LINES)):
 
         error_blank = ERROR_SIZE + RULE_BLANK_MAX
 
@@ -531,11 +537,11 @@ class JsFormatter:
         state.pos = pos + 1
         self._handle_whitespace_between_tokens(state,
                                                self._rule_whitespace(space_number=0,
-                                                                     enter_number=(0, _MAX_BLANK_LINES),
+                                                                     enter_number=(-1, _MAX_BLANK_LINES),
                                                                      error_message=ERROR_SIZE + " after token",
                                                                      error_blank=ERROR_SIZE + RULE_BLANK_MAX))
 
-    def _handle_whitespace_between_tokens(self, state, whitespace_rule):
+    def _handle_whitespace_between_tokens2(self, state, whitespace_rule):
         was_error = False
         declaration_start = state.pos
         counter = self._get_next_non_whitespace(state)
@@ -578,17 +584,17 @@ class JsFormatter:
                 else:
                     enter_number = max(whitespace_rule[Tokens.Enter][1], whitespace_rule[Tokens.Enter][0])
 
-                while enter_number > 0 and counter[Tokens.Enter] > 0:
+                while enter_number > 0 and counter[Tokens.Enter] >= 0:
                     cur_pos = index
                     while state.all_tokens[cur_pos].type == Tokens.Tab or \
                             state.all_tokens[cur_pos].type == Tokens.Space:
                         cur_pos += 1
                     was_error = self._handle_indents(state, index, cur_pos, counter[Tokens.Enter] > 0, no_errors)
-                    if state.all_tokens[cur_pos].type == Tokens.Enter:
-                        self._token.append(Token(token_type=Tokens.Enter,
-                                                 row=state.all_tokens[cur_pos].row + state.row_offset,
-                                                 column=self._next_pos_of_token()))
-                        index = cur_pos + 1
+
+                    self._token.append(Token(token_type=Tokens.Enter,
+                                             row=state.all_tokens[cur_pos].row + state.row_offset,
+                                             column=self._next_pos_of_token()))
+                    index = cur_pos + 1
 
                     counter[Tokens.Enter] -= 1
                     enter_number -= 1
@@ -664,6 +670,157 @@ class JsFormatter:
                     was_error = True
 
         return was_error
+
+    def _handle_whitespace_between_tokens(self, state, whitespace_rule):
+        declaration_start = state.pos
+        counter = self._get_next_non_whitespace(state)
+        index = declaration_start
+        was_good_space = False
+        was_bad_space = False
+        if state.pos >= len(state.all_tokens):
+            return
+        if state.all_tokens[index].type == Tokens.Space:
+            if whitespace_rule[Tokens.Space] >= 1:
+                was_good_space = True
+                self._token.append(state.all_tokens[index])
+            else:
+                was_bad_space = True
+            index += 1
+
+        while index < state.pos and state.all_tokens[index].type != Tokens.Enter:
+            was_bad_space = True
+            index += 1
+
+        whitespace_rule[Tokens.Enter] = [whitespace_rule[Tokens.Enter][0] + 1, whitespace_rule[Tokens.Enter][1] + 1]
+
+        if whitespace_rule[Tokens.Enter][0] <= counter[Tokens.Enter] <= whitespace_rule[Tokens.Enter][1] or \
+                whitespace_rule[Tokens.Enter][1] < whitespace_rule[Tokens.Enter][0] == counter[Tokens.Enter]:
+
+            if (was_good_space or was_bad_space) and counter[Tokens.Enter] != 0:
+                self._invalid_token.append(WrongToken(message=ERROR_SIZE + " in the end of line",
+                                                      token=state.all_tokens[declaration_start - 1]))
+                if was_good_space:
+                    self._token.pop()
+
+            elif counter[Tokens.Enter] == 0:
+                if whitespace_rule[Tokens.Space] >= 1 and not was_good_space:
+                    self._token.append(Token(token_type=Tokens.Space,
+                                             row=state.row_offset + state.all_tokens[declaration_start].row,
+                                             column=state.all_tokens[declaration_start].column))
+                    self._invalid_token.append(WrongToken(message=whitespace_rule['error_message'],
+                                                          token=state.all_tokens[declaration_start - 1]))
+                return
+
+            self._token.append(Token(token_type=Tokens.Enter,
+                                     row=state.all_tokens[declaration_start].row + state.row_offset,
+                                     column=self._next_pos_of_token()))
+            index += 1
+            counter[Tokens.Enter] -= 1
+            if index == len(state.all_tokens):
+                return
+            while counter[Tokens.Enter] >= 0 and index < len(state.all_tokens):
+                cur_pos = index
+                while state.all_tokens[cur_pos].type == Tokens.Tab or state.all_tokens[cur_pos].type == Tokens.Space:
+                    cur_pos += 1
+                was_error = self._handle_indents(state, index, cur_pos, counter[Tokens.Enter] > 0, False)
+                if state.all_tokens[cur_pos].type == Tokens.Enter:
+                    self._token.append(Token(token_type=Tokens.Enter,
+                                             row=state.all_tokens[cur_pos].row + state.row_offset,
+                                             column=self._next_pos_of_token()))
+                    index = cur_pos + 1
+
+                counter[Tokens.Enter] -= 1
+        elif whitespace_rule[Tokens.Enter][0] <= whitespace_rule[Tokens.Enter][1] < counter[Tokens.Enter] or\
+                whitespace_rule[Tokens.Enter][1] < whitespace_rule[Tokens.Enter][0] < counter[Tokens.Enter]:
+
+            self._invalid_token.append(WrongToken(message=whitespace_rule['error_blank'],
+                                                  token=state.all_tokens[declaration_start - 1]))
+
+            if (was_good_space or was_bad_space) and max(whitespace_rule[Tokens.Enter]) > 0:
+                self._invalid_token.append(WrongToken(message=ERROR_SIZE + " in the end of line",
+                                                      token=state.all_tokens[declaration_start - 1]))
+                if was_good_space:
+                    self._token.pop()
+            elif max(whitespace_rule[Tokens.Enter]) == 0:
+                if whitespace_rule[Tokens.Space] >= 1 and not was_good_space:
+                    self._token.append(Token(token_type=Tokens.Space,
+                                             row=state.row_offset + state.all_tokens[declaration_start].row,
+                                             column=state.all_tokens[declaration_start].column))
+                return
+                # self._invalid_token.append(WrongToken(message=whitespace_rule['error_message'],
+                #                                       token=state.all_tokens[declaration_start - 1]))
+
+            self._token.append(Token(token_type=Tokens.Enter,
+                                     row=state.all_tokens[declaration_start].row + state.row_offset,
+                                     column=self._next_pos_of_token()))
+            index += 1
+            if index == len(state.all_tokens):
+                return
+            counter[Tokens.Enter] -= 1
+
+            max_enter_number = max(whitespace_rule[Tokens.Enter]) - 1
+            while max_enter_number >= 0 and index < len(state.all_tokens):
+                cur_pos = index
+                while state.all_tokens[cur_pos].type == Tokens.Tab or state.all_tokens[cur_pos].type == Tokens.Space:
+                    cur_pos += 1
+                was_error = self._handle_indents(state, index, cur_pos, counter[Tokens.Enter] > 0, True)
+                if state.all_tokens[cur_pos].type == Tokens.Enter and max_enter_number > 0:
+                    self._token.append(Token(token_type=Tokens.Enter,
+                                             row=state.all_tokens[cur_pos].row + state.row_offset,
+                                             column=self._next_pos_of_token()))
+                    index = cur_pos + 1
+                max_enter_number -= 1
+                counter[Tokens.Enter] -= 1
+
+            while counter[Tokens.Enter] >= 0 and index < len(state.all_tokens):
+                while state.all_tokens[index].type == Tokens.Tab or state.all_tokens[index].type == Tokens.Space:
+                    index += 1
+                counter[Tokens.Enter] -= 1
+                state.row_offset -= 1
+        elif counter[Tokens.Enter] < whitespace_rule[Tokens.Enter][0]:
+            if was_good_space or was_bad_space:
+                self._invalid_token.append(WrongToken(message=ERROR_SIZE + " in the end of line",
+                                                      token=state.all_tokens[declaration_start - 1]))
+                if was_good_space:
+                    self._token.pop()
+
+                if counter[Tokens.Enter] != 0:
+                    index += 1
+                    if index == len(state.all_tokens):
+                        return
+
+            self._invalid_token.append(WrongToken(message=whitespace_rule['error_blank'],
+                                                  token=state.all_tokens[declaration_start - 1]))
+
+            spaces_row = [Token(token_type=Tokens.Enter,
+                                row=state.all_tokens[declaration_start].row + state.row_offset,
+                                column=self._next_pos_of_token())]
+            if self._config['Tabs and Indents']['Keep indents on empty lines']:
+                tab_size = self._config['Tabs and Indents']['Tab size']
+                indent_size = self._config['Tabs and Indents']['Indent']
+                cont_indent_size = self._config['Tabs and Indents']['Continuation indent']
+                total_size_indent = indent_size * state.indent + cont_indent_size * state.continuous_indent
+                number_of_tabs = total_size_indent // tab_size
+                number_of_spaces = total_size_indent - number_of_tabs * tab_size
+
+                if self._config['Tabs and Indents']['Use tab character']:
+                    for i in range(0, number_of_tabs):
+                        spaces_row.append(Token(token_type=Tokens.Tab,
+                                                row=state.row_offset + state.all_tokens[declaration_start - 1].row,
+                                                column=tab_size * i))
+                    for i in range(0, number_of_spaces):
+                        spaces_row.append(Token(token_type=Tokens.Space,
+                                                row=state.row_offset + state.all_tokens[declaration_start - 1].row,
+                                                column=i))
+                else:
+                    number_of_spaces = total_size_indent
+                    for i in range(0, number_of_spaces):
+                        spaces_row.append(Token(token_type=Tokens.Space,
+                                                row=state.row_offset + state.all_tokens[declaration_start - 1].row,
+                                                column=i))
+            while whitespace_rule[Tokens.Enter][0] > 0:
+                whitespace_rule[Tokens.Enter][0] -= 1
+                self._token.extend(spaces_row)
 
     def _handle_indents(self, state, start, end, is_empty, no_errors):
         if is_empty and not self._config['Tabs and Indents']['Keep indents on empty lines']:
@@ -765,10 +922,9 @@ class JsFormatter:
 
         whitespace_counter = self._get_next_non_whitespace(state)
         if state.pos >= len(state.all_tokens):
+            state.pos = start_pos
             if check_end:
                 self._end_of_file(state, start_pos)
-            else:
-                state.pos = start_pos
             return Token()
 
         ans = state.all_tokens[state.pos]
@@ -779,7 +935,7 @@ class JsFormatter:
         start_pos = state.pos
         state.pos -= 1
 
-        while state.pos >= 0 and is_whitespace(state.all_tokens[state.pos]):
+        while state.pos >= 0 and is_whitespace_token(state.all_tokens[state.pos].type):
             state.pos -= 1
 
         if state.pos < 0:
@@ -807,6 +963,8 @@ class JsFormatter:
             self._handle_do_while(state)
         elif current_token.spec == 'try':
             self._handle_try_catch(state)
+        elif current_token.spec == 'switch':
+            self._handle_switch(state)
         else:
             self._token.append(state.all_tokens[state.pos])
 
@@ -887,7 +1045,7 @@ class JsFormatter:
             if was_star:
                 enter_number = (-1, -1)
             else:
-                enter_number = (0, _MAX_BLANK_LINES)
+                enter_number = (-1, _MAX_BLANK_LINES)
 
             state.pos += 1
             self._handle_whitespace_between_tokens(
@@ -963,7 +1121,7 @@ class JsFormatter:
             self._handle_whitespace_between_tokens(
                 state,
                 self._rule_whitespace(space_number=space_number,
-                                      enter_number=(0, _MAX_BLANK_LINES),
+                                      enter_number=(-1, _MAX_BLANK_LINES),
                                       error_message=error_text,
                                       error_blank=ERROR_SIZE + " after token"))
 
@@ -1086,9 +1244,9 @@ class JsFormatter:
         if bkt_type == '}':
             enter_number = (-1, -1)
         else:
-            enter_number = (0, max_blank_lines)
+            enter_number = (-1, max_blank_lines)
 
-        was_error = self._handle_whitespace_between_tokens(
+        self._handle_whitespace_between_tokens(
             state,
             self._rule_whitespace(space_number=space_number,
                                   enter_number=enter_number,
@@ -1205,10 +1363,10 @@ class JsFormatter:
 
         state.pos += 1
         state.indent += 1
-        was_error = self._handle_whitespace_between_tokens(
+        self._handle_whitespace_between_tokens(
             state,
             self._rule_whitespace(space_number=space_number,
-                                  enter_number=(0, _MAX_BLANK_LINES),
+                                  enter_number=(-1, _MAX_BLANK_LINES),
                                   error_message=rule_error_text,
                                   error_blank=ERROR_SIZE + RULE_BLANK_MAX))
 
@@ -1325,8 +1483,80 @@ class JsFormatter:
         else:
             return
 
-    def print_all_tokens(self):
-        with open('new_file.js', 'w') as f:
+    def _handle_switch(self, state):
+        where = Scope.Switch
+
+        self._token.append(state.all_tokens[state.pos])
+        prev_token = state.all_tokens[state.pos]
+
+        declaration_start = state.pos
+        next_token = self._get_next_token(state)
+        if next_token.is_fake():
+            return
+
+        if next_token.type == Tokens.Punctuation and next_token.spec == '(':
+            space_number, error_text = self._get_check_tokens_result(state, prev_token, next_token, where)
+            self._handle_bkt(state, space_number, error_text, declaration_start, next_token,
+                             _MAX_BLANK_LINES, where, ')')
+        else:
+            return
+
+        if state.pos >= len(state.all_tokens):
+            return
+
+        finish_parentheses = state.pos
+        prev_token = state.all_tokens[finish_parentheses]
+        next_token = self._get_next_token(state)
+        if next_token.is_fake():
+            return
+
+        if next_token.type == Tokens.Punctuation and next_token.spec == '{':
+            space_number, error_text = self._get_check_tokens_result(state, prev_token, next_token, where)
+            self._handle_switch_bkt(state, space_number, error_text, finish_parentheses, next_token,
+                                    _MAX_BLANK_LINES, where, '}')
+        else:
+            return
+
+    def _handle_switch_bkt(self, state, space_number, rule_error_text, declaration_start, current_token,
+                           max_blank_lines, where, bkt_type):
+
+        state.pos += 1
+        enter_number = (-1, -1)
+        self._handle_whitespace_between_tokens(
+            state,
+            self._rule_whitespace(space_number=space_number,
+                                  enter_number=enter_number,
+                                  error_message=rule_error_text,
+                                  error_blank=ERROR_SIZE + RULE_BLANK_MAX))
+
+        current_token = self._get_next_token(state)
+        if current_token.is_fake():
+            return
+        first_case = True
+        last = None
+        while state.pos < len(state.all_tokens):
+            current_token = state.all_tokens[state.pos]
+            next_token = self._get_next_token(state, False)
+            if current_token.spec == ':':
+                state.indent += 1
+                last = ':'
+            if next_token.spec == 'case':
+                if not first_case:
+                    state.indent -= 1
+                else:
+                    first_case = False
+                last = 'case'
+            if next_token.spec == bkt_type:
+                if last == ':':
+                    state.indent -= 1
+                self._parse_next_token(state, where)
+                self._token.append(state.all_tokens[state.pos])
+                break
+            else:
+                self._parse_next_token(state, where)
+
+    def print_all_tokens(self, file_name):
+        with open(file_name, 'w') as f:
             original_stdout = sys.stdout
             sys.stdout = f
             for token in self._token:
@@ -1340,33 +1570,95 @@ class JsFormatter:
                     print(token.type.value, end='')
             sys.stdout = original_stdout
 
-    def print_all(self):
-        print('------------------------all tokens------------------------')
-        for tok in self._token:
-            if tok.type != Tokens.Space and tok.type != Tokens.Tab:
+    def print_log(self, file_name):
+        with open("log.txt", "a") as f:
+            original_stdout = sys.stdout
+            sys.stdout = f
+            print('##########-----------' + file_name + '-----------##########')
+
+            print('------------------------error format------------------------')
+            for tok in self._invalid_token:
                 print(tok, end=' ')
-                if tok.index is not None:
-                    print(str(tok.index) + ') |' + self._symbol_table[tok.index] + '|')
+                if tok.token.index is not None:
+                    print('|| Token value: ' + str(tok.token.index) + ') |' + self._symbol_table[tok.token.index] + '|')
                 else:
                     print('')
-            if tok.type == Tokens.Enter:
-                print('')
-        print('------------------------error syntax------------------------')
-        for tok in self._invalid_token:
-            print(tok, end=' ')
-            if tok.token.index is not None:
-                print('|| Token value: ' + str(tok.token.index) + ') |' + self._symbol_table[tok.token.index] + '|')
-            else:
-                print('')
+            if len(self._invalid_token) == 0:
+                print("No format errors")
 
-        print('------------------------lexer error------------------------')
-        for tok in self._lexer_error_list:
-            print(tok, end=' ')
-            if tok.token.index is not None:
-                print('|| Token value: ' + str(tok.token.index) + ') |' + self._symbol_table[tok.token.index] + '|')
-            else:
-                print('')
+            print('------------------------lexer error------------------------')
+            for tok in self._lexer_error_list:
+                print(tok, end=' ')
+                if tok.token.index is not None:
+                    print('|| Token value: ' + str(tok.token.index) + ') |' + self._symbol_table[tok.token.index] + '|')
+                else:
+                    print('')
 
-        print('------------------------symbol table------------------------')
-        for i in range(len(self._symbol_table)):
-            print(str(i) + ') ', '|' + self._symbol_table[i] + '|')
+            if len(self._lexer_error_list) == 0:
+                print("No lexer errors")
+            print('\n\n\n')
+            sys.stdout = original_stdout
+
+
+def _get_dirs_from_path(my_path):
+    return [f for f in listdir(my_path) if not isfile(join(my_path, f))]
+
+
+def _get_js_files_from_path(my_path):
+    all_files = [f for f in listdir(my_path) if isfile(join(my_path, f))]
+    js_files = []
+    for f in all_files:
+        f_name, f_ext = splitext(f)
+        if f_ext == '.js':
+            js_files.append(f)
+    return js_files
+
+
+def _get_result(file_name, conf_name, action_type):
+    formatter = JsFormatter()
+    formatter.set_up_config(conf_name)
+    formatter.process_js_file(file_name)
+    if action_type == '-v' or action_type == '--verify':
+        formatter.print_log(file_name)
+        print("Done verify of " + file_name + "")
+    elif action_type == '-f' or action_type == '--format':
+        formatter.print_all_tokens(file_name)
+        print("Done format of " + file_name + "")
+    del formatter
+
+
+def _check_files_in_dir(my_path, conf_name, action_type):
+    js_files = _get_js_files_from_path(my_path)
+    for js_file in js_files:
+        _get_result(join(my_path, js_file), conf_name, action_type)
+
+
+def _check_rec(my_path, conf_name, action_type):
+    _check_files_in_dir(my_path, conf_name, action_type)
+
+    dirs = _get_dirs_from_path(my_path)
+    for dir in dirs:
+        _check_rec(join(my_path, dir), conf_name, action_type)
+
+
+if __name__ == '__main__':
+    if os.path.exists("log.txt"):
+        os.remove("log.txt")
+    if sys.argv[1] in ('-h', '--help'):
+        print("Basic commands:")
+        print("\t-h, --help\t\t\t\t: help menu")
+        print("\t-v, --verify template file -(p|d|f) /..\t: verify your files(as output log.txt file);")
+        print("\t\t\t\t\t\t  template file - configuration file for JS(as default take: config/config.json);")
+        print("\t\t\t\t\t\t  /.. - path to project directory or file")
+
+        print("\t-f, --format template file -(p|d|f) /..\t: format your files(as output log.txt file);")
+        print("\t\t\t\t\t\t  template file - configuration file for JS(as default take: config/config.json);")
+        print("\t\t\t\t\t\t  /.. - path to project directory or file")
+    elif len(sys.argv) == 5 and sys.argv[3] == '-p':
+        _check_rec(sys.argv[4], sys.argv[2], sys.argv[1])
+    elif len(sys.argv) == 5 and sys.argv[3] == '-d':
+        _check_files_in_dir(sys.argv[4], sys.argv[2], sys.argv[1])
+    elif len(sys.argv) == 5 and sys.argv[3] == '-f':
+        _get_result(sys.argv[4], sys.argv[2], sys.argv[1])
+    else:
+        print("Call help menu (-h, --help) for more details")
