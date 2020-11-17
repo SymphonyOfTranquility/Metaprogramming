@@ -41,7 +41,7 @@ class Tokens(Enum):
                  '?', ':',
                  '...'
                  )
-
+    Regex = 'regex'
     Invalid = 'Invalid'
     Interpolation = 'Interpolation'
 

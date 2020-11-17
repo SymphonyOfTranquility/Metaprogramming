@@ -528,18 +528,95 @@ class Lexer:
                 break
             state.column += 1
 
-        self._token.append(Token(token_type=Tokens.Operators,
-                                 row=state.row,
-                                 column=start_pos,
-                                 spec=op))
+        if op == '/':
+            self._check_regex(state)
+        else:
+            self._token.append(Token(token_type=Tokens.Operators,
+                                     row=state.row,
+                                     column=start_pos,
+                                     spec=op))
+
+    def _check_regex(self, state):
+        start_pos = state.column - 1
+        i = len(self._token)-1
+        from TokenChecks import is_whitespace_token
+        while i >= 0 and is_whitespace_token(self._token[i].type):
+            i -= 1
+        if i < 0 or self._token[i].type != Tokens.Identifier \
+                or self._token[i].type != Tokens.NumberLiteral:
+
+            regex = '/'
+            while state.column < len(state.line):
+                if state.line[state.column] != '/':
+                    regex += state.line[state.column]
+                    state.column += 1
+                else:
+                    break
+            if state.column < len(state.line):
+                regex += '/'
+            state.column += 1
+
+            if state.column >= len(state.line):
+                if state.line[-1] == '\n':
+                    state.column = len(state.line)-1
+                    regex = regex[:-1]
+                regex_token = Token(token_type=Tokens.Regex,
+                                    row=state.row,
+                                    column=start_pos,
+                                    index=len(self._symbol_table))
+                self._invalid_token.append(WrongToken(message="Regex has no end",
+                                                      token=regex_token))
+                self._symbol_table.append(regex)
+                self._token.append(regex_token)
+            else:
+                was_error = False
+                while state.column < len(state.line):
+                    c = state.line[state.column]
+                    if not is_symbol(c) or c == '_':
+                        if is_number(c) or c == '_':
+                            was_error = True
+                            regex += c
+                        break
+                    regex += c
+                    state.column += 1
+                if not was_error:
+                    regex_token = Token(token_type=Tokens.Regex,
+                                        row=state.row,
+                                        column=start_pos,
+                                        index=len(self._symbol_table))
+                    self._symbol_table.append(regex)
+                    self._token.append(regex_token)
+                else:
+                    regex = regex[:]
+                    regex_token = Token(token_type=Tokens.Regex,
+                                        row=state.row,
+                                        column=start_pos,
+                                        index=len(self._symbol_table))
+                    self._invalid_token.append(WrongToken(message="Regex incorrect ending",
+                                                          token=regex_token))
+                    self._symbol_table.append(regex)
+                    self._token.append(regex_token)
+                    state.column += 1
+        else:
+            self._token.append(Token(token_type=Tokens.Operators,
+                                     row=state.row,
+                                     column=start_pos,
+                                     spec='/'))
 
     def _handle_single_line_comment(self, state):
-        comment = state.line[state.column:-1]
+        if state.line[-1] != '\n':
+            comment = state.line[state.column:]
+        else:
+            comment = state.line[state.column:-1]
         self._add_correct_token(token_type=Tokens.SingleLineComment,
                                 row=state.row,
                                 column=state.column,
                                 lit_value=comment)
-        state.column = len(state.line)-1
+
+        if state.line[-1] == '\n':
+            state.column = len(state.line)-1
+        else:
+            state.column = len(state.line)
 
     def _handle_multi_line_comment(self, state):
         pos = state.line[state.column:].find("*/")

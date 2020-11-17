@@ -321,6 +321,9 @@ class JsFormatter:
                 and self._symbol_table[next_token.index] in ('rest', 'spread'):
             error_text += self._error_rule_text_creation("Spaces", "Other", "After '...' in rest/spread")
             return int(self._config["Spaces"]["Other"]["After '...' in rest/spread"]), error_text
+        elif prev_token.type == Tokens.Operators and prev_token.spec == '...':
+            error_text += " after token"
+            return 0, error_text
 
         # Spaces -> Before Keywords [ requires '}' of prev_token) ]
         if prev_token.type == Tokens.Punctuation and prev_token.spec == '}':
@@ -372,6 +375,10 @@ class JsFormatter:
                 and prev_token.type == Tokens.Operators and prev_token.spec == '*':
             error_text += self._error_rule_text_creation("Spaces", "Other", "After '*' in generator")
             return int(self._config["Spaces"]["Other"]["After '*' in generator"]), error_text
+
+        if prev_token.type == Tokens.StartTemplateString or prev_token.type == Tokens.InterpolationEnd:
+            error_text = "LEXER ERROR"
+            return 0, error_text
 
         fake_next = Token()
         return self._check_general_space_for_prev_next_token(state, prev_token, fake_next, where)
@@ -499,6 +506,10 @@ class JsFormatter:
 
         if next_token.spec == ':' and where == Scope.Switch:
             error_text += " after token"
+            return 0, error_text
+
+        if next_token.type == Tokens.EndTemplateString or next_token.type == Tokens.InterpolationStart:
+            error_text = "LEXER ERROR"
             return 0, error_text
 
         fake_prev = Token()
