@@ -543,7 +543,7 @@ class Lexer:
         while i >= 0 and is_whitespace_token(self._token[i].type):
             i -= 1
         if i < 0 or self._token[i].type != Tokens.Identifier \
-                or self._token[i].type != Tokens.NumberLiteral:
+                and self._token[i].type != Tokens.NumberLiteral:
 
             regex = '/'
             while state.column < len(state.line):
