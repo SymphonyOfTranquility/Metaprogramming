@@ -6,7 +6,7 @@ import json
 from enum import Enum
 
 from Lexer import Lexer
-from DictTokenTypes import Tokens, Scope
+from DictTokenTypes import Tokens, Scope, BlankLines
 from TokenClasses import Token, WrongToken
 from CharChecks import *
 from TokenChecks import *
@@ -23,6 +23,8 @@ ERROR_SIZE = "Wrong number of whitespaces"
 ERROR_WRONG_WHITESPACE = "Wrong whitespace"
 ERROR_ORDER = "Wrong order of whitespaces"
 RULE_BLANK_MAX = ". Rule: Blank Lines -> Keep Maximum Blank Lines"
+RULES_SET = {}
+
 _MAX_BLANK_LINES = 2
 
 
@@ -37,6 +39,7 @@ class _CurrentState:
         self.continuous_indent = 0
         self.empty_line_counter = 0
         self.outer_scope = Scope.GeneralScope
+        self.enter_number = (-1, -1)
 
 
 class JsFormatter:
@@ -52,8 +55,13 @@ class JsFormatter:
         with open(path_to_config) as f:
             self._config = json.load(f)
 
-        global _MAX_BLANK_LINES
-        _MAX_BLANK_LINES = self._config['Blank Lines']['Keep Maximum Blank Lines']
+        global RULES_SET
+        RULES_SET[BlankLines.Max] = self._config['Blank Lines']['Keep Maximum Blank Lines']
+        RULES_SET[BlankLines.Imports] = self._config['Blank Lines']['Minimum Blank Lines']['After imports']
+        RULES_SET[BlankLines.Class] = self._config['Blank Lines']['Minimum Blank Lines']['Around class']
+        RULES_SET[BlankLines.Field] = self._config['Blank Lines']['Minimum Blank Lines']['Around field']
+        RULES_SET[BlankLines.Method] = self._config['Blank Lines']['Minimum Blank Lines']['Around method']
+        RULES_SET[BlankLines.Func] = self._config['Blank Lines']['Minimum Blank Lines']['Around function']
 
     def process_js_file(self, path_to_file):
         lexer = Lexer()
@@ -62,6 +70,7 @@ class JsFormatter:
         self._lexer_error_list = lexer.get_error_tokens_list()
         self._symbol_table = lexer.get_symbol_table()
         state = _CurrentState()
+        state.enter_number = (-1, RULES_SET[BlankLines.Max])
 
         while state.pos < len(state.all_tokens) and is_whitespace_token(state.all_tokens[state.pos].type):
             state.pos += 1
@@ -98,8 +107,10 @@ class JsFormatter:
 
         if state.pos < len(state.all_tokens) and not handle_indent:
             if where == Scope.Switch and current_token.spec == ':':
-                self._check_space_to_next_token(state, where, (0, _MAX_BLANK_LINES))
+                state.enter_number = (0, RULES_SET[BlankLines.Max])
+                self._check_space_to_next_token(state, where)
             else:
+                state.enter_number = (-1, RULES_SET[BlankLines.Max])
                 self._check_space_to_next_token(state, where)
 
         if was_comma:
@@ -128,7 +139,7 @@ class JsFormatter:
             start_pos -= 1
         return counter
 
-    def _check_space_to_next_token(self, state, where, enter_number=(-1, _MAX_BLANK_LINES)):
+    def _check_space_to_next_token(self, state, where):
 
         error_blank = ERROR_SIZE + RULE_BLANK_MAX
 
@@ -145,7 +156,7 @@ class JsFormatter:
         self._handle_whitespace_between_tokens(
             state,
             self._rule_whitespace(space_number=space_number,
-                                  enter_number=enter_number,
+                                  enter_number=state.enter_number,
                                   error_message=error_message,
                                   error_blank=error_blank))
 
@@ -564,7 +575,7 @@ class JsFormatter:
         state.pos = pos + 1
         self._handle_whitespace_between_tokens(state,
                                                self._rule_whitespace(space_number=0,
-                                                                     enter_number=(-1, _MAX_BLANK_LINES),
+                                                                     enter_number=(-1, RULES_SET[BlankLines.Max]),
                                                                      error_message=ERROR_SIZE + " after token",
                                                                      error_blank=ERROR_SIZE + RULE_BLANK_MAX))
 
@@ -994,6 +1005,8 @@ class JsFormatter:
             self._handle_try_catch(state)
         elif current_token.spec == 'switch':
             self._handle_switch(state)
+        elif current_token.spec == 'class':
+            self._handle_class(state)
         else:
             self._token.append(state.all_tokens[state.pos])
 
@@ -1009,11 +1022,28 @@ class JsFormatter:
 
         # func call
         if current_token.type == Tokens.Punctuation and current_token.spec == '(':
-            where = Scope.FuncCall
+            if where != Scope.Class:
+                where = Scope.FuncCall
 
-            space_number, error_text = self._get_check_tokens_result(state, prev_token, current_token, where)
-            self._handle_bkt(state, space_number, error_text, declaration_start, current_token,
-                             _MAX_BLANK_LINES, where, ')')
+                space_number, error_text = self._get_check_tokens_result(state, prev_token, current_token, where)
+                self._handle_bkt(state, space_number, error_text, declaration_start, current_token,
+                                 RULES_SET[BlankLines.Max], where, ')')
+            else:
+                start_pos = state.pos
+                while state.pos < len(state.all_tokens):
+                    if state.all_tokens[state.pos].spec == ')':
+                        break
+                    state.pos += 1
+                current_token = self._get_next_token(state, False)
+                state.pos = start_pos
+                if current_token.spec != '{':
+                    where = Scope.FuncCall
+                    space_number, error_text = self._get_check_tokens_result(state, prev_token, current_token, where)
+                    self._handle_bkt(state, space_number, error_text, declaration_start, current_token,
+                                     RULES_SET[BlankLines.Max], where, ')')
+                else:
+                    self._handle_function_creation(state, where)
+
         elif current_token.type == Tokens.Punctuation and current_token.spec == '[':
             where = Scope.IndexAccessBrackets
             space_number, error_text = self._get_check_tokens_result(state, prev_token, current_token, where)
@@ -1023,7 +1053,7 @@ class JsFormatter:
             self._handle_whitespace_between_tokens(
                 state,
                 self._rule_whitespace(space_number=0,
-                                      enter_number=(-1, _MAX_BLANK_LINES),
+                                      enter_number=(-1, RULES_SET[BlankLines.Max]),
                                       error_message=error_text,
                                       error_blank=ERROR_SIZE + RULE_BLANK_MAX))
 
@@ -1033,13 +1063,12 @@ class JsFormatter:
             if current_token.is_fake():
                 return
 
-
             space_number, error_text = self._get_check_tokens_result(state, prev_token, current_token, where)
             state.pos += 1
             self._handle_whitespace_between_tokens(
                 state,
                 self._rule_whitespace(space_number=space_number,
-                                      enter_number=(-1, _MAX_BLANK_LINES),
+                                      enter_number=(-1, RULES_SET[BlankLines.Max]),
                                       error_message=error_text,
                                       error_blank=ERROR_SIZE + RULE_BLANK_MAX))
 
@@ -1120,6 +1149,7 @@ class JsFormatter:
 
             self._token.append(current_token)
 
+            state.enter_number = (-1, RULES_SET[BlankLines.Max])
             self._check_space_to_next_token(state, where)
 
             was_colon = False
@@ -1134,10 +1164,11 @@ class JsFormatter:
         else:
             self._token.append(current_token)
 
-    def _handle_function_creation(self, state):
+    def _handle_function_creation(self, state, where_outer=None):
         where = Scope.FuncDeclaration
 
-        self._token.append(state.all_tokens[state.pos])
+        if where_outer != Scope.Class:
+            self._token.append(state.all_tokens[state.pos])
         prev_token = state.all_tokens[state.pos]
 
         declaration_start = state.pos
@@ -1146,7 +1177,7 @@ class JsFormatter:
             return
 
         was_star = False
-        if current_token.type == Tokens.Operators and current_token.spec == '*':
+        if current_token.type == Tokens.Operators and current_token.spec == '*' and where_outer != Scope.Class:
             was_star = True
 
             space_number, error_text = self._get_check_tokens_result(state, prev_token, current_token, where)
@@ -1167,13 +1198,13 @@ class JsFormatter:
                 return
 
         was_identifier = False
-        if current_token.type == Tokens.Identifier:
+        if current_token.type == Tokens.Identifier and where_outer != Scope.Class:
             was_identifier = True
             space_number, error_text = self._get_check_tokens_result(state, prev_token, current_token, where)
             if was_star:
                 enter_number = (-1, -1)
             else:
-                enter_number = (-1, _MAX_BLANK_LINES)
+                enter_number = (-1, RULES_SET[BlankLines.Max])
 
             state.pos += 1
             self._handle_whitespace_between_tokens(
@@ -1191,12 +1222,12 @@ class JsFormatter:
                 return
 
         if current_token.type == Tokens.Punctuation and current_token.spec == '(':
-            if not was_identifier:
+            if not was_identifier and where_outer != Scope.Class:
                 where = Scope.FuncExpression
 
             space_number, error_text = self._get_check_tokens_result(state, prev_token, current_token, where)
             self._handle_bkt(state, space_number, error_text, declaration_start, current_token,
-                             _MAX_BLANK_LINES, where, ')')
+                             RULES_SET[BlankLines.Max], where, ')')
         else:
             return
 
@@ -1212,9 +1243,73 @@ class JsFormatter:
         if current_token.type == Tokens.Punctuation and current_token.spec == '{':
             space_number, error_text = self._get_check_tokens_result(state, prev_token, current_token, where)
             self._handle_bkt(state, space_number, error_text, finish_parentheses, current_token,
-                             _MAX_BLANK_LINES, Scope.GeneralScope, '}')
+                             RULES_SET[BlankLines.Max], Scope.GeneralScope, '}')
         else:
             return
+
+    def _handle_class(self, state):
+        where = Scope.Class
+
+        self._token.append(state.all_tokens[state.pos])
+        prev_token = state.all_tokens[state.pos]
+
+        declaration_start = state.pos
+        next_token = self._get_next_token(state)
+        if next_token.is_fake():
+            return
+
+        if next_token.type == Tokens.Identifier:
+            was_identifier = True
+            space_number, error_text = self._get_check_tokens_result(state, prev_token, next_token, where)
+            enter_number = (-1, RULES_SET[BlankLines.Max])
+
+            state.pos += 1
+            self._handle_whitespace_between_tokens(
+                state,
+                self._rule_whitespace(space_number=space_number,
+                                      enter_number=enter_number,
+                                      error_message=error_text,
+                                      error_blank=ERROR_SIZE + " after token"))
+            declaration_start = state.pos
+            self._token.append(state.all_tokens[state.pos])
+            prev_token = state.all_tokens[state.pos]
+
+            next_token = self._get_next_token(state)
+            if next_token.is_fake():
+                return
+        else:
+            return
+
+        if next_token.type == Tokens.Punctuation and next_token.spec == '{':
+
+            space_number, error_text = self._get_check_tokens_result(state, prev_token, next_token, where)
+            self._handle_class_bkt(state, space_number, error_text, declaration_start, next_token,
+                                   RULES_SET[BlankLines.Max], where, '}')
+
+    def _handle_class_bkt(self, state, space_number, rule_error_text, declaration_start, current_token,
+                           max_blank_lines, where, bkt_type):
+
+        state.pos += 1
+        enter_number = (-1, -1)
+        self._handle_whitespace_between_tokens(
+            state,
+            self._rule_whitespace(space_number=space_number,
+                                  enter_number=enter_number,
+                                  error_message=rule_error_text,
+                                  error_blank=ERROR_SIZE + RULE_BLANK_MAX))
+
+        current_token = self._get_next_token(state)
+        if current_token.is_fake():
+            return
+        first_case = True
+        last = None
+        while state.pos < len(state.all_tokens):
+            current_token = state.all_tokens[state.pos]
+            if current_token.spec == bkt_type:
+                self._token.append(state.all_tokens[state.pos])
+                break
+            else:
+                self._parse_next_token(state, where)
 
     def _handle_yield(self, state):
 
@@ -1256,7 +1351,7 @@ class JsFormatter:
             if was_star:
                 enter_number = (-1, -1)
             else:
-                enter_number = (-1, _MAX_BLANK_LINES)
+                enter_number = (-1, RULES_SET[BlankLines.Max])
 
             state.pos += 1
             self._handle_whitespace_between_tokens(
@@ -1279,7 +1374,7 @@ class JsFormatter:
 
             space_number, error_text = self._get_check_tokens_result(state, prev_token, current_token, where)
             self._handle_bkt(state, space_number, error_text, declaration_start, current_token,
-                             _MAX_BLANK_LINES, where, ')')
+                             RULES_SET[BlankLines.Max], where, ')')
         else:
             return
 
@@ -1300,7 +1395,7 @@ class JsFormatter:
         if current_token.type == Tokens.Punctuation and current_token.spec == '(':
             space_number, error_text = self._get_check_tokens_result(state, prev_token, current_token, where)
             self._handle_bkt(state, space_number, error_text, declaration_start, current_token,
-                             _MAX_BLANK_LINES, Scope.FuncDeclaration, ')')
+                             RULES_SET[BlankLines.Max], Scope.FuncDeclaration, ')')
         else:
             return
 
@@ -1319,7 +1414,7 @@ class JsFormatter:
             self._handle_whitespace_between_tokens(
                 state,
                 self._rule_whitespace(space_number=space_number,
-                                      enter_number=(-1, _MAX_BLANK_LINES),
+                                      enter_number=(-1, RULES_SET[BlankLines.Max]),
                                       error_message=error_text,
                                       error_blank=ERROR_SIZE + " after token"))
 
@@ -1345,7 +1440,7 @@ class JsFormatter:
         if current_token.type == Tokens.Punctuation and current_token.spec == '{':
             space_number, error_text = self._get_check_tokens_result(state, prev_token, current_token, where)
             self._handle_bkt(state, space_number, error_text, finish_parentheses, current_token,
-                             _MAX_BLANK_LINES, Scope.GeneralScope, '}')
+                             RULES_SET[BlankLines.Max], Scope.GeneralScope, '}')
         else:
             return
 
@@ -1363,7 +1458,7 @@ class JsFormatter:
         if next_token.type == Tokens.Punctuation and next_token.spec == '{':
             space_number, error_text = self._get_check_tokens_result(state, prev_token, next_token, where)
             self._handle_bkt(state, space_number, error_text, declaration_start, next_token,
-                             _MAX_BLANK_LINES, Scope.GeneralScope, '}')
+                             RULES_SET[BlankLines.Max], Scope.GeneralScope, '}')
         else:
             return
 
@@ -1380,8 +1475,8 @@ class JsFormatter:
             return
 
         where = Scope.Catch
-
-        self._check_space_to_next_token(state, where, (-1, -1))
+        state.enter_number = (-1, -1)
+        self._check_space_to_next_token(state, where)
         self._token.append(next_token)
 
         next_token = self._get_next_token(state)
@@ -1391,7 +1486,7 @@ class JsFormatter:
         if next_token.type == Tokens.Punctuation and next_token.spec == '(':
             space_number, error_text = self._get_check_tokens_result(state, prev_token, next_token, where)
             self._handle_bkt(state, space_number, error_text, declaration_start, next_token,
-                             _MAX_BLANK_LINES, where, ')')
+                             RULES_SET[BlankLines.Max], where, ')')
         else:
             return
 
@@ -1407,7 +1502,7 @@ class JsFormatter:
         if next_token.type == Tokens.Punctuation and next_token.spec == '{':
             space_number, error_text = self._get_check_tokens_result(state, prev_token, next_token, where)
             self._handle_bkt(state, space_number, error_text, finish_parentheses, next_token,
-                             _MAX_BLANK_LINES, Scope.GeneralScope, '}')
+                             RULES_SET[BlankLines.Max], Scope.GeneralScope, '}')
         else:
             return
 
@@ -1421,7 +1516,8 @@ class JsFormatter:
 
         if next_token.type == Tokens.Keyword and next_token.spec == 'finally':
             where = Scope.Finally
-            self._check_space_to_next_token(state, where, (-1, -1))
+            state.enter_number = (-1, -1)
+            self._check_space_to_next_token(state, where)
 
             self._token.append(next_token)
 
@@ -1431,7 +1527,7 @@ class JsFormatter:
             if next_token.type == Tokens.Punctuation and next_token.spec == '{':
                 space_number, error_text = self._get_check_tokens_result(state, prev_token, next_token, where)
                 self._handle_bkt(state, space_number, error_text, finish_parentheses, next_token,
-                                 _MAX_BLANK_LINES, Scope.GeneralScope, '}')
+                                 RULES_SET[BlankLines.Max], Scope.GeneralScope, '}')
             else:
                 return
 
@@ -1499,7 +1595,7 @@ class JsFormatter:
         if next_token.type == Tokens.Punctuation and next_token.spec == '(':
             space_number, error_text = self._get_check_tokens_result(state, prev_token, next_token, where)
             self._handle_bkt(state, space_number, error_text, declaration_start, next_token,
-                             _MAX_BLANK_LINES, where, ')')
+                             RULES_SET[BlankLines.Max], where, ')')
         else:
             return
 
@@ -1515,12 +1611,12 @@ class JsFormatter:
         if next_token.type == Tokens.Punctuation and next_token.spec == '{':
             space_number, error_text = self._get_check_tokens_result(state, prev_token, next_token, where)
             self._handle_bkt(state, space_number, error_text, finish_parentheses, next_token,
-                             _MAX_BLANK_LINES, Scope.GeneralScope, '}')
+                             RULES_SET[BlankLines.Max], Scope.GeneralScope, '}')
         elif next_token.type == Tokens.Keyword and not next_token.spec == 'else' \
                 or next_token.type == Tokens.Identifier:
             space_number, error_text = self._get_check_tokens_result(state, prev_token, next_token, where)
             self._handle_one_liner(state, space_number, error_text, finish_parentheses, next_token,
-                                   _MAX_BLANK_LINES, Scope.GeneralScope)
+                                   RULES_SET[BlankLines.Max], Scope.GeneralScope)
         else:
             return
 
@@ -1535,9 +1631,11 @@ class JsFormatter:
         if next_token.type == Tokens.Keyword and next_token.spec == 'else':
             where = Scope.Else
             if prev_token.spec == '}':
-                self._check_space_to_next_token(state, where, (-1, -1))
+                state.enter_number = (-1, -1)
+                self._check_space_to_next_token(state, where)
             else:
-                self._check_space_to_next_token(state, where, (0, 1))
+                state.enter_number = (0, 1)
+                self._check_space_to_next_token(state, where)
 
             self._token.append(next_token)
 
@@ -1547,12 +1645,12 @@ class JsFormatter:
             if next_token.type == Tokens.Punctuation and next_token.spec == '{':
                 space_number, error_text = self._get_check_tokens_result(state, prev_token, next_token, where)
                 self._handle_bkt(state, space_number, error_text, finish_parentheses, next_token,
-                                 _MAX_BLANK_LINES, Scope.GeneralScope, '}')
+                                 RULES_SET[BlankLines.Max], Scope.GeneralScope, '}')
             elif next_token.type == Tokens.Keyword and not next_token.spec == 'else' \
                     or next_token.type == Tokens.Identifier:
                 space_number, error_text = self._get_check_tokens_result(state, prev_token, next_token, where)
                 self._handle_one_liner(state, space_number, error_text, finish_parentheses, next_token,
-                                       _MAX_BLANK_LINES, Scope.GeneralScope)
+                                       RULES_SET[BlankLines.Max], Scope.GeneralScope)
             else:
                 return
 
@@ -1564,7 +1662,7 @@ class JsFormatter:
         self._handle_whitespace_between_tokens(
             state,
             self._rule_whitespace(space_number=space_number,
-                                  enter_number=(-1, _MAX_BLANK_LINES),
+                                  enter_number=(-1, RULES_SET[BlankLines.Max]),
                                   error_message=rule_error_text,
                                   error_blank=ERROR_SIZE + RULE_BLANK_MAX))
 
@@ -1610,7 +1708,7 @@ class JsFormatter:
         if next_token.type == Tokens.Punctuation and next_token.spec == '(':
             space_number, error_text = self._get_check_tokens_result(state, prev_token, next_token, where)
             self._handle_bkt(state, space_number, error_text, declaration_start, next_token,
-                             _MAX_BLANK_LINES, where, ')')
+                             RULES_SET[BlankLines.Max], where, ')')
         else:
             return
 
@@ -1626,12 +1724,12 @@ class JsFormatter:
         if next_token.type == Tokens.Punctuation and next_token.spec == '{':
             space_number, error_text = self._get_check_tokens_result(state, prev_token, next_token, where)
             self._handle_bkt(state, space_number, error_text, finish_parentheses, next_token,
-                             _MAX_BLANK_LINES, Scope.GeneralScope, '}')
+                             RULES_SET[BlankLines.Max], Scope.GeneralScope, '}')
         elif next_token.type == Tokens.Keyword and not next_token.spec == 'else' \
                 or next_token.type == Tokens.Identifier:
             space_number, error_text = self._get_check_tokens_result(state, prev_token, next_token, where)
             self._handle_one_liner(state, space_number, error_text, finish_parentheses, next_token,
-                                   _MAX_BLANK_LINES, Scope.GeneralScope)
+                                   RULES_SET[BlankLines.Max], Scope.GeneralScope)
         else:
             return
 
@@ -1649,7 +1747,7 @@ class JsFormatter:
         if next_token.type == Tokens.Punctuation and next_token.spec == '{':
             space_number, error_text = self._get_check_tokens_result(state, prev_token, next_token, where)
             self._handle_bkt(state, space_number, error_text, declaration_start, next_token,
-                             _MAX_BLANK_LINES, Scope.GeneralScope, '}')
+                             RULES_SET[BlankLines.Max], Scope.GeneralScope, '}')
         else:
             return
 
@@ -1667,7 +1765,8 @@ class JsFormatter:
 
         where = Scope.While
 
-        self._check_space_to_next_token(state, where, (-1, -1))
+        state.enter_number = (-1, -1)
+        self._check_space_to_next_token(state, where)
         self._token.append(next_token)
 
         next_token = self._get_next_token(state)
@@ -1677,7 +1776,7 @@ class JsFormatter:
         if next_token.type == Tokens.Punctuation and next_token.spec == '(':
             space_number, error_text = self._get_check_tokens_result(state, prev_token, next_token, where)
             self._handle_bkt(state, space_number, error_text, declaration_start, next_token,
-                             _MAX_BLANK_LINES, where, ')')
+                             RULES_SET[BlankLines.Max], where, ')')
         else:
             return
 
@@ -1695,7 +1794,7 @@ class JsFormatter:
         if next_token.type == Tokens.Punctuation and next_token.spec == '(':
             space_number, error_text = self._get_check_tokens_result(state, prev_token, next_token, where)
             self._handle_bkt(state, space_number, error_text, declaration_start, next_token,
-                             _MAX_BLANK_LINES, where, ')')
+                             RULES_SET[BlankLines.Max], where, ')')
         else:
             return
 
@@ -1711,7 +1810,7 @@ class JsFormatter:
         if next_token.type == Tokens.Punctuation and next_token.spec == '{':
             space_number, error_text = self._get_check_tokens_result(state, prev_token, next_token, where)
             self._handle_switch_bkt(state, space_number, error_text, finish_parentheses, next_token,
-                                    _MAX_BLANK_LINES, where, '}')
+                                    RULES_SET[BlankLines.Max], where, '}')
         else:
             return
 

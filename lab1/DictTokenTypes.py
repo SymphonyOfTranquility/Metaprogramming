@@ -96,4 +96,11 @@ class Scope(Enum):
     BeforeComma = tuple([','])
 
 
+class BlankLines(Enum):
+    Max = auto()
 
+    Imports = auto()
+    Class = auto()
+    Field = auto()
+    Method = auto()
+    Func = auto()
