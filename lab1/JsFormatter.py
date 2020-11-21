@@ -155,6 +155,38 @@ class _CurrentState:
 
             if current_pos >= len(self.all_tokens):
                 return
+        elif where == Scope.Class:
+            prev_pos = self._prev_non_whitespace(self.pos - 1)
+            if self.all_tokens[prev_pos].type == Tokens.SingleLineComment or\
+                    self.all_tokens[prev_pos].type == Tokens.MultiLineComment:
+                self.blank_line_rules[prev_pos] = (0, 0, " after comment before field in class")
+                prev_pos = self._prev_non_whitespace(prev_pos- 1)
+            if self.all_tokens[prev_pos].spec != '{':
+                if self.blank_line_rules[prev_pos][0] < RULES_SET[BlankLines.Field]:
+                    self.blank_line_rules[prev_pos] = (RULES_SET[BlankLines.Field],
+                                                       RULES_SET[BlankLines.Max],
+                                                       ERROR_SIZE +
+                                                       self._error_rule_text_creation('Blank Lines',
+                                                                                      'Minimum Blank Lines',
+                                                                                      'Around field'))
+            while self.pos < current_pos:
+                self.blank_line_rules.append((-1, RULES_SET[BlankLines.Max], ''))
+                self.pos += 1
+            self.blank_line_rules.append((-1, RULES_SET[BlankLines.Max], ''))
+            self.pos += 1
+            while self.pos < len(self.all_tokens) and self.all_tokens[self.pos].spec != ';':
+                self._parse_next_token()
+
+            self.blank_line_rules.append((RULES_SET[BlankLines.Field], RULES_SET[BlankLines.Max],
+                                          ERROR_SIZE + self._error_rule_text_creation('Blank Lines',
+                                                                                      'Minimum Blank Lines',
+                                                                                      'Around field')))
+            # TODO rules for braces (min value)
+
+            current_pos = self._next_non_whitespace(self.pos + 1)
+
+            if current_pos >= len(self.all_tokens):
+                return
 
     def _error_rule_text_creation(self, main_rule, sub_rule, rule_name):
         return ". Rule: " + main_rule + " -> " + sub_rule + " -> " + rule_name + "."
@@ -1852,6 +1884,7 @@ class JsFormatter:
                 state.pos = start_pos
                 if current_token.spec != '{':
                     where = Scope.FuncCall
+                    current_token = self._get_next_token(state, False)
                     space_number, error_text = self._get_check_tokens_result(state, prev_token, current_token, where)
                     self._handle_bkt(state, space_number, error_text, declaration_start, current_token,
                                      RULES_SET[BlankLines.Max], where, ')')
