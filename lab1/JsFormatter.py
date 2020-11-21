@@ -132,8 +132,8 @@ class _CurrentState:
             self._handle_functions()
         elif current_token.spec == 'if' or current_token.spec == 'for' or current_token.spec == 'while':
             self._handle_common_statements(current_token.spec)
-        # elif current_token.spec == 'async':
-        #     self._handle_async()
+        elif current_token.spec == 'async':
+            self._handle_async()
         elif current_token.spec == 'do':
             self._handle_do_while()
         # elif current_token.spec == 'try':
@@ -436,6 +436,74 @@ class _CurrentState:
             self.pos += 1
             return
 
+    def _handle_async(self):
+        self.blank_line_rules.append((-1, RULES_SET[BlankLines.Max], ''))
+        self.pos += 1
+        current_pos = self._next_non_whitespace(self.pos)
+
+        if current_pos >= len(self.all_tokens):
+            self.pos += 1
+            return
+
+        if self.all_tokens[current_pos].type == Tokens.Punctuation and self.all_tokens[current_pos].spec == '(':
+
+            while self.pos < current_pos:
+                self.blank_line_rules.append((-1, RULES_SET[BlankLines.Max], ' before "("'))
+                self.pos += 1
+
+            current_pos += 1
+            while self.pos < len(self.all_tokens) and self.all_tokens[self.pos].spec != ')':
+                self._parse_next_token()
+
+            current_pos = self._next_non_whitespace(self.pos + 1)
+
+            if current_pos >= len(self.all_tokens):
+                return
+
+        else:
+            self.blank_line_rules.append((-1, RULES_SET[BlankLines.Max], ''))
+            self.pos += 1
+            return
+
+        if self.all_tokens[current_pos].spec == '=>':
+            while self.pos < current_pos:
+                self.blank_line_rules.append((-1, -1, ERROR_SIZE + ' before "=>"'))
+                self.pos += 1
+
+            current_pos = self._next_non_whitespace(current_pos + 1)
+
+            if current_pos >= len(self.all_tokens):
+                return
+        else:
+            self.blank_line_rules.append((-1, RULES_SET[BlankLines.Max], ''))
+            self.pos += 1
+            return
+
+        if self.all_tokens[current_pos].type == Tokens.Punctuation and self.all_tokens[current_pos].spec == '{':
+
+            # TODO rules for braces (min value)
+            while self.pos < current_pos:
+                self.blank_line_rules.append((-1, -1, ERROR_SIZE + ' before "{"'))
+                self.pos += 1
+
+            self.blank_line_rules.append((0, RULES_SET[BlankLines.Max], ERROR_SIZE + ' after "{"'))
+            self.pos += 1
+            while self.pos < len(self.all_tokens) and self.all_tokens[self.pos].spec != '}':
+                self._parse_next_token()
+
+            self.blank_line_rules.append((-1, RULES_SET[BlankLines.Max], ''))
+            # TODO rules for braces (min value)
+
+            current_pos = self._next_non_whitespace(self.pos + 1)
+
+            if current_pos >= len(self.all_tokens):
+                return
+
+        else:
+            self.blank_line_rules.append((-1, RULES_SET[BlankLines.Max], ''))
+            self.pos += 1
+            return
+
     def _next_non_whitespace(self, pos):
         while pos < len(self.all_tokens) and is_whitespace_token(self.all_tokens[pos].type):
             pos += 1
@@ -477,7 +545,6 @@ class JsFormatter:
         state = _CurrentState()
 
         state.check_blank_lines(0)
-
         state.enter_number = (-1, RULES_SET[BlankLines.Max])
         state.pos = 0
         while state.pos < len(state.all_tokens) and is_whitespace_token(state.all_tokens[state.pos].type):
