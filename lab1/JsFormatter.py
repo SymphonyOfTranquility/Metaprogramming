@@ -66,8 +66,9 @@ class _CurrentState:
         prev_pos = self._prev_non_whitespace(self.pos - 1)
         if prev_pos < 0:
             return
+
         self.blank_line_rules.append(self.blank_line_rules[prev_pos])
-        self.blank_line_rules[prev_pos] = (-1, RULES_SET[BlankLines.Max],'')
+        self.blank_line_rules[prev_pos] = (-1, RULES_SET[BlankLines.Max], '')
 
     def _error_rule_text_creation(self, main_rule, sub_rule, rule_name):
         return ". Rule: " + main_rule + " -> " + sub_rule + " -> " + rule_name + "."
@@ -138,12 +139,10 @@ class _CurrentState:
             self._handle_do_while()
         elif current_token.spec == 'try':
             self._handle_try_catch()
-        # elif current_token.spec == 'switch':
-        #     self._handle_switch()
+        elif current_token.spec == 'switch':
+            self._handle_switch()
         # elif current_token.spec == 'class':
         #     self._handle_class()
-        else:
-            self._check_what_is_next()
 
     def _handle_common_statements(self, spec):
         self.blank_line_rules.append((-1, RULES_SET[BlankLines.Max], ''))
@@ -184,7 +183,7 @@ class _CurrentState:
             self.pos += 1
             while self.pos < len(self.all_tokens) and self.all_tokens[self.pos].spec != '}':
                 self._parse_next_token()
-            self.blank_line_rules.append((-1, RULES_SET[BlankLines.Max], ''))
+            self.blank_line_rules.append((0, RULES_SET[BlankLines.Max], ''))
 
             # TODO rules for braces (min value)
 
@@ -220,7 +219,7 @@ class _CurrentState:
                 self.pos += 1
                 while self.pos < len(self.all_tokens) and self.all_tokens[self.pos].spec != '}':
                     self._parse_next_token()
-                self.blank_line_rules.append((-1, RULES_SET[BlankLines.Max], ''))
+                self.blank_line_rules.append((0, RULES_SET[BlankLines.Max], ''))
 
     def _handle_imports(self):
         current_pos = self.pos + 1
@@ -287,7 +286,7 @@ class _CurrentState:
             self.pos += 1
             while self.pos < len(self.all_tokens) and self.all_tokens[self.pos].spec != '}':
                 self._parse_next_token()
-            self.blank_line_rules.append((-1, RULES_SET[BlankLines.Max], ''))
+            self.blank_line_rules.append((0, RULES_SET[BlankLines.Max], ''))
 
             # TODO rules for braces (min value)
 
@@ -419,7 +418,7 @@ class _CurrentState:
                                                                                       'Minimum Blank Lines',
                                                                                       'Around function')))
             else:
-                self.blank_line_rules.append((-1, RULES_SET[BlankLines.Max],''))
+                self.blank_line_rules.append((0, RULES_SET[BlankLines.Max], ''))
             # TODO rules for braces (min value)
 
             current_pos = self._next_non_whitespace(self.pos + 1)
@@ -435,6 +434,63 @@ class _CurrentState:
                                                                                       'Around function')))
             # else:
             #     self.blank_line_rules.append((-1, RULES_SET[BlankLines.Max],''))
+            self.pos += 1
+            return
+
+    def _handle_switch(self):
+        self.blank_line_rules.append((-1, RULES_SET[BlankLines.Max], ''))
+        self.pos += 1
+        current_pos = self._next_non_whitespace(self.pos)
+
+        if current_pos >= len(self.all_tokens):
+            self.pos += 1
+            return
+
+        if self.all_tokens[current_pos].type == Tokens.Punctuation and self.all_tokens[current_pos].spec == '(':
+
+            while self.pos < current_pos:
+                self.blank_line_rules.append((-1, RULES_SET[BlankLines.Max], ''))
+                self.pos += 1
+
+            while self.pos < len(self.all_tokens) and self.all_tokens[self.pos].spec != ')':
+                self._parse_next_token()
+
+            current_pos = self._next_non_whitespace(self.pos + 1)
+
+            if current_pos >= len(self.all_tokens):
+                return
+
+        else:
+            self.blank_line_rules.append((-1, RULES_SET[BlankLines.Max], ''))
+            self.pos += 1
+            return
+
+        if self.all_tokens[current_pos].type == Tokens.Punctuation and self.all_tokens[current_pos].spec == '{':
+
+            # TODO rules for braces (min value)
+            while self.pos < current_pos:
+                self.blank_line_rules.append((-1, -1, ERROR_SIZE + ' before "{"'))
+                self.pos += 1
+
+            self.blank_line_rules.append((0, RULES_SET[BlankLines.Max], ERROR_SIZE + ' after "{"'))
+            self.pos += 1
+            while self.pos < len(self.all_tokens) and self.all_tokens[self.pos].spec != '}':
+                if self.all_tokens[self.pos].spec == ':':
+                    self.blank_line_rules.append((0, RULES_SET[BlankLines.Max], ERROR_SIZE + ' after ":" in switch'))
+                    self.pos += 1
+                else:
+                    self._parse_next_token()
+            self.blank_line_rules.append((0, RULES_SET[BlankLines.Max], ''))
+
+            # TODO rules for braces (min value)
+
+            current_pos = self._next_non_whitespace(self.pos + 1)
+
+            if current_pos >= len(self.all_tokens):
+                return
+
+        else:
+            self.blank_line_rules.append((-1, RULES_SET[BlankLines.Max], ''))
             self.pos += 1
             return
 
@@ -493,7 +549,7 @@ class _CurrentState:
             while self.pos < len(self.all_tokens) and self.all_tokens[self.pos].spec != '}':
                 self._parse_next_token()
 
-            self.blank_line_rules.append((-1, RULES_SET[BlankLines.Max], ''))
+            self.blank_line_rules.append((0, RULES_SET[BlankLines.Max], ''))
             # TODO rules for braces (min value)
 
             current_pos = self._next_non_whitespace(self.pos + 1)
@@ -527,7 +583,7 @@ class _CurrentState:
             self.pos += 1
             while self.pos < len(self.all_tokens) and self.all_tokens[self.pos].spec != '}':
                 self._parse_next_token()
-            self.blank_line_rules.append((-1, RULES_SET[BlankLines.Max], ''))
+            self.blank_line_rules.append((0, RULES_SET[BlankLines.Max], ''))
 
             # TODO rules for braces (min value)
 
@@ -575,16 +631,37 @@ class _CurrentState:
             self.pos += 1
             return
 
-        if self.all_tokens[current_pos].spec == 'finally':
-            self.blank_line_rules.append((-1, RULES_SET[BlankLines.Max], ''))
+        if self.all_tokens[current_pos].type == Tokens.Punctuation and self.all_tokens[current_pos].spec == '{':
+            # TODO rules for braces (min value)
+            while self.pos < current_pos:
+                self.blank_line_rules.append((-1, -1, ERROR_SIZE + ' before "{"'))
+                self.pos += 1
+
+            self.blank_line_rules.append((0, RULES_SET[BlankLines.Max], ERROR_SIZE + ' after "{"'))
             self.pos += 1
-            current_pos = self._next_non_whitespace(self.pos)
+            while self.pos < len(self.all_tokens) and self.all_tokens[self.pos].spec != '}':
+                self._parse_next_token()
+            self.blank_line_rules.append((0, RULES_SET[BlankLines.Max], ''))
+
+            # TODO rules for braces (min value)
+
+            current_pos = self._next_non_whitespace(self.pos + 1)
 
             if current_pos >= len(self.all_tokens):
-                self.pos += 1
                 return
 
-            if self.all_tokens[current_pos].type == Tokens.Punctuation and self.all_tokens[current_pos].spec == '{':
+        if self.all_tokens[current_pos].spec == 'finally':
+            self.blank_line_rules[-1] = (-1, -1, ERROR_SIZE + ' before "finally"')
+            self.pos += 1
+            while self.pos < current_pos:
+                self.blank_line_rules.append((-1, -1, ERROR_SIZE + ' before "finally"'))
+                self.pos += 1
+
+            current_pos = self._next_non_whitespace(current_pos + 1)
+            if current_pos >= len(self.all_tokens):
+                return
+
+            if self.all_tokens[current_pos].spec == '{':
 
                 # TODO rules for braces (min value)
                 while self.pos < current_pos:
@@ -595,15 +672,7 @@ class _CurrentState:
                 self.pos += 1
                 while self.pos < len(self.all_tokens) and self.all_tokens[self.pos].spec != '}':
                     self._parse_next_token()
-                self.blank_line_rules.append((-1, RULES_SET[BlankLines.Max], ''))
-
-                # TODO rules for braces (min value)
-
-                current_pos = self._next_non_whitespace(self.pos + 1)
-
-                if current_pos >= len(self.all_tokens):
-                    return
-
+                self.blank_line_rules.append((0, RULES_SET[BlankLines.Max], ''))
         else:
             self.blank_line_rules.append((-1, RULES_SET[BlankLines.Max], ''))
             self.pos += 1
