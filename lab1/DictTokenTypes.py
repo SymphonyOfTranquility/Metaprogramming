@@ -104,3 +104,7 @@ class BlankLines(Enum):
     Field = auto()
     Method = auto()
     Func = auto()
+
+    MaxLen = auto()
+    Indent = auto()
+    ContIndent = auto()

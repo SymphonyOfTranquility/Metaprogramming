@@ -43,6 +43,8 @@ class _CurrentState:
         self.empty_line_counter = 0
         self.outer_scope = Scope.GeneralScope
         self.enter_number = (-1, -1)
+        self.len_line = 0
+        self.symbol_table = []
 
     def check_blank_lines(self, start_pos):
         self.pos = start_pos
@@ -81,6 +83,7 @@ class _CurrentState:
             return
 
         if self.all_tokens[current_pos].type == Tokens.Punctuation and self.all_tokens[current_pos].spec == '(':
+            self.continuous_indent += 1
             while self.pos < current_pos:
                 self.blank_line_rules.append((-1, RULES_SET[BlankLines.Max], ' before "("'))
                 self.pos += 1
@@ -88,13 +91,14 @@ class _CurrentState:
             current_pos += 1
             while self.pos < len(self.all_tokens) and self.all_tokens[self.pos].spec != ')':
                 self._parse_next_token()
-
+            self.continuous_indent = max(self.continuous_indent - 1, 0)
             self.blank_line_rules.append((-1, RULES_SET[BlankLines.Max], ''))
 
             current_pos = self._next_non_whitespace(self.pos + 1)
 
             if where == Scope.Class:
                 if self.all_tokens[current_pos].type == Tokens.Punctuation and self.all_tokens[current_pos].spec == '{':
+                    self.indent += 1
                     prev_pos = self._prev_non_whitespace(start_pos-1)
                     while self.all_tokens[prev_pos].type == Tokens.Keyword:
                         self.blank_line_rules[prev_pos] = (-1, -1, ERROR_SIZE + " before method in class")
@@ -104,6 +108,7 @@ class _CurrentState:
                         self.blank_line_rules[prev_pos] = (0, 0, ERROR_SIZE + " after comment before method in class")
                         prev_pos = self._prev_non_whitespace(prev_pos - 1)
                     if self.all_tokens[prev_pos].spec != '{':
+
                         if self.blank_line_rules[prev_pos][0] < RULES_SET[BlankLines.Method]:
                             self.blank_line_rules[prev_pos] = (RULES_SET[BlankLines.Method],
                                                                RULES_SET[BlankLines.Max],
@@ -122,11 +127,13 @@ class _CurrentState:
                     self.blank_line_rules.append((0, RULES_SET[BlankLines.Max], ERROR_SIZE + ' after "{"'))
                     while self.pos < len(self.all_tokens) and self.all_tokens[self.pos].spec != '}':
                         self._parse_next_token()
-
+                    self.indent = max(self.indent - 1, 0)
                     self.blank_line_rules.append((RULES_SET[BlankLines.Method], RULES_SET[BlankLines.Max],
                                                   ERROR_SIZE + self._error_rule_text_creation('Blank Lines',
                                                                                               'Minimum Blank Lines',
                                                                                               'Around method')))
+                    self.len_line = self.indent * RULES_SET[BlankLines.Indent] + \
+                                    self.continuous_indent * RULES_SET[BlankLines.ContIndent]
                     # TODO rules for braces (min value)
 
                     current_pos = self._next_non_whitespace(self.pos + 1)
@@ -181,6 +188,8 @@ class _CurrentState:
                                           ERROR_SIZE + self._error_rule_text_creation('Blank Lines',
                                                                                       'Minimum Blank Lines',
                                                                                       'Around field')))
+            self.len_line = self.indent * RULES_SET[BlankLines.Indent] + \
+                            self.continuous_indent * RULES_SET[BlankLines.ContIndent]
             # TODO rules for braces (min value)
 
             current_pos = self._next_non_whitespace(self.pos + 1)
@@ -192,6 +201,39 @@ class _CurrentState:
         return ". Rule: " + main_rule + " -> " + sub_rule + " -> " + rule_name + "."
 
     def _check_what_is_next(self):
+        if self.all_tokens[self.pos].type == Tokens.Enter:
+            self.len_line = self.indent * RULES_SET[BlankLines.Indent] + \
+                            self.continuous_indent * RULES_SET[BlankLines.ContIndent]
+        if self.all_tokens[self.pos].spec is not None:
+            self.len_line += len(self.all_tokens[self.pos].spec) + 1
+        elif self.all_tokens[self.pos].index is not None:
+            self.len_line += len(self.symbol_table[self.all_tokens[self.pos].index]) + 1
+        elif self.all_tokens[self.pos].type == Tokens.StartTemplateString or self.all_tokens[self.pos].type == Tokens.EndTemplateString:
+            self.len_line += 2
+        elif not is_whitespace_token(self.all_tokens[self.pos].type):
+            self.len_line += len(self.all_tokens[self.pos].type.value) + 1
+        if self.len_line > RULES_SET[BlankLines.MaxLen]:
+            prev_pos = self._prev_non_whitespace(self.pos-1)
+            if self.all_tokens[self.pos].type == Tokens.EndTemplateString:
+                prev_pos = self._prev_non_whitespace(prev_pos-1)
+                if self.all_tokens[self.pos].type == Tokens.StartTemplateString:
+                    prev_pos = self._prev_non_whitespace(prev_pos-1)
+            if prev_pos >= 0 and self.blank_line_rules[prev_pos][0] < 0:
+                self.blank_line_rules[prev_pos] = (0, RULES_SET[BlankLines.Max], 'Size of line is more than ' + str(RULES_SET[BlankLines.MaxLen]))
+            self.len_line = self.indent * RULES_SET[BlankLines.Indent] + \
+                            self.continuous_indent*RULES_SET[BlankLines.ContIndent]
+            prev_pos = self._prev_non_whitespace(prev_pos + 1)
+            while prev_pos <= self.pos:
+                if self.all_tokens[prev_pos].spec is not None:
+                    self.len_line += len(self.all_tokens[prev_pos].spec) + 1
+                elif self.all_tokens[self.pos].index is not None:
+                    self.len_line += len(self.symbol_table[self.all_tokens[prev_pos].index]) + 1
+                elif self.all_tokens[prev_pos].type == Tokens.StartTemplateString or self.all_tokens[prev_pos].type == Tokens.EndTemplateString:
+                    self.len_line += 2
+                else:
+                    self.len_line += len(self.all_tokens[prev_pos].type.value) + 1
+                prev_pos = self._next_non_whitespace(prev_pos + 1)
+
         next_pos = self._next_non_whitespace(self.pos + 1)
         if next_pos >= len(self.all_tokens):
             if len(self.blank_line_rules) == self.pos:
@@ -203,9 +245,13 @@ class _CurrentState:
             if len(self.blank_line_rules) == self.pos:
                 self.pos += 1
                 self.blank_line_rules.append((0, RULES_SET[BlankLines.Max], ERROR_SIZE + ' before "}"'))
+                self.len_line = self.indent * RULES_SET[BlankLines.Indent] + \
+                                self.continuous_indent * RULES_SET[BlankLines.ContIndent]
             else:
                 self.pos += 1
                 self.blank_line_rules[-1] = (0, RULES_SET[BlankLines.Max], ERROR_SIZE + ' before "}"')
+                self.len_line = self.indent * RULES_SET[BlankLines.Indent] + \
+                                self.continuous_indent * RULES_SET[BlankLines.ContIndent]
         elif self.all_tokens[next_pos].spec == 'function':
             next_next_pos = self._next_non_whitespace(next_pos + 1)
             if next_next_pos < len(self.all_tokens) and self.all_tokens[next_next_pos].spec == '*':
@@ -215,6 +261,9 @@ class _CurrentState:
                     self.all_tokens[self.pos].type == Tokens.SingleLineComment:
                 prev_token = self._prev_non_whitespace(self.pos - 1)
                 enter_number = (0, 0, ERROR_SIZE + ' between comment and func')
+
+                self.len_line = self.indent * RULES_SET[BlankLines.Indent] + \
+                                self.continuous_indent * RULES_SET[BlankLines.ContIndent]
                 if prev_token >= 0 and self.blank_line_rules[prev_token][0] < RULES_SET[BlankLines.Func]:
                     self.blank_line_rules[prev_token] = (RULES_SET[BlankLines.Func], RULES_SET[BlankLines.Max],
                                                          ERROR_SIZE + self._error_rule_text_creation('Blank Lines',
@@ -228,6 +277,8 @@ class _CurrentState:
                                 ERROR_SIZE + self._error_rule_text_creation('Blank Lines',
                                                                             'Minimum Blank Lines',
                                                                             'Around function'))
+                self.len_line = self.indent * RULES_SET[BlankLines.Indent] + \
+                                self.continuous_indent * RULES_SET[BlankLines.ContIndent]
             else:
                 enter_number = (-1, RULES_SET[BlankLines.Max], '')
 
@@ -240,7 +291,8 @@ class _CurrentState:
                     self.blank_line_rules[-1] = enter_number
         elif self.all_tokens[next_pos].spec == 'class':
             enter_number = (RULES_SET[BlankLines.Class], RULES_SET[BlankLines.Max], '')
-
+            self.len_line = self.indent * RULES_SET[BlankLines.Indent] + \
+                            self.continuous_indent * RULES_SET[BlankLines.ContIndent]
             if len(self.blank_line_rules) == self.pos:
                 self.pos += 1
                 self.blank_line_rules.append(enter_number)
@@ -283,13 +335,14 @@ class _CurrentState:
 
         if self.all_tokens[current_pos].type == Tokens.Punctuation and self.all_tokens[current_pos].spec == '(':
 
+            self.continuous_indent += 1
             while self.pos < current_pos:
                 self.blank_line_rules.append((-1, RULES_SET[BlankLines.Max], ''))
                 self.pos += 1
 
             while self.pos < len(self.all_tokens) and self.all_tokens[self.pos].spec != ')':
                 self._parse_next_token()
-
+            self.continuous_indent = max(self.continuous_indent - 1, 0)
             current_pos = self._next_non_whitespace(self.pos + 1)
 
             if current_pos >= len(self.all_tokens):
@@ -302,16 +355,24 @@ class _CurrentState:
 
         if self.all_tokens[current_pos].type == Tokens.Punctuation and self.all_tokens[current_pos].spec == '{':
 
+            self.indent += 1
             # TODO rules for braces (min value)
             while self.pos < current_pos:
                 self.blank_line_rules.append((-1, -1, ERROR_SIZE + ' before "{"'))
                 self.pos += 1
 
             self.blank_line_rules.append((0, RULES_SET[BlankLines.Max], ERROR_SIZE + ' after "{"'))
+
+            self.len_line = self.indent * RULES_SET[BlankLines.Indent] + \
+                            self.continuous_indent * RULES_SET[BlankLines.ContIndent]
             self.pos += 1
             while self.pos < len(self.all_tokens) and self.all_tokens[self.pos].spec != '}':
                 self._parse_next_token()
+            self.indent = max(self.indent - 1, 0)
             self.blank_line_rules.append((0, RULES_SET[BlankLines.Max], ''))
+
+            self.len_line = self.indent * RULES_SET[BlankLines.Indent] + \
+                            self.continuous_indent * RULES_SET[BlankLines.ContIndent]
 
             # TODO rules for braces (min value)
 
@@ -338,16 +399,24 @@ class _CurrentState:
 
             if self.all_tokens[current_pos].spec == '{':
 
+                self.indent += 1
                 # TODO rules for braces (min value)
                 while self.pos < current_pos:
                     self.blank_line_rules.append((-1, -1, ERROR_SIZE + ' before "{"'))
                     self.pos += 1
 
                 self.blank_line_rules.append((0, RULES_SET[BlankLines.Max], ERROR_SIZE + ' after "{"'))
+
+                self.len_line = self.indent * RULES_SET[BlankLines.Indent] + \
+                                self.continuous_indent * RULES_SET[BlankLines.ContIndent]
                 self.pos += 1
                 while self.pos < len(self.all_tokens) and self.all_tokens[self.pos].spec != '}':
                     self._parse_next_token()
+                self.indent = max(self.indent - 1, 0)
                 self.blank_line_rules.append((0, RULES_SET[BlankLines.Max], ''))
+
+                self.len_line = self.indent * RULES_SET[BlankLines.Indent] + \
+                                self.continuous_indent * RULES_SET[BlankLines.ContIndent]
 
     def _handle_imports(self):
         current_pos = self.pos + 1
@@ -371,19 +440,30 @@ class _CurrentState:
 
         if self.all_tokens[next_start].spec == 'import':
             self.blank_line_rules.append((0, 0, ERROR_SIZE + ' between imports'))
+
+            self.len_line = self.indent * RULES_SET[BlankLines.Indent] + \
+                            self.continuous_indent * RULES_SET[BlankLines.ContIndent]
         elif self.all_tokens[next_start].type == Tokens.Enter:
             current_pos = self._next_non_whitespace(current_pos + 1)
             if self.all_tokens[current_pos].spec == 'import':
                 self.blank_line_rules.append((0, 0, ERROR_SIZE + ' between imports'))
+
+                self.len_line = self.indent * RULES_SET[BlankLines.Indent] + \
+                                self.continuous_indent * RULES_SET[BlankLines.ContIndent]
             else:
                 self.blank_line_rules.append((RULES_SET[BlankLines.Imports], RULES_SET[BlankLines.Max],
                                               ERROR_SIZE + self._error_rule_text_creation('Blank Lines',
                                                                                           'Minimum Blank Lines',
                                                                                           'After imports')))
+                self.len_line = self.indent * RULES_SET[BlankLines.Indent] + \
+                                self.continuous_indent * RULES_SET[BlankLines.ContIndent]
         else:
             current_pos = self._next_non_whitespace(current_pos + 1)
             if self.all_tokens[current_pos].spec == 'import':
                 self.blank_line_rules.append((0, 0, ERROR_SIZE + ' between imports'))
+
+                self.len_line = self.indent * RULES_SET[BlankLines.Indent] + \
+                                self.continuous_indent * RULES_SET[BlankLines.ContIndent]
             else:
                 self.blank_line_rules.append((-1, RULES_SET[BlankLines.Max], ''))
                 self.pos += 1
@@ -391,6 +471,8 @@ class _CurrentState:
                                               ERROR_SIZE + self._error_rule_text_creation('Blank Lines',
                                                                                           'Minimum Blank Lines',
                                                                                           'After imports')))
+                self.len_line = self.indent * RULES_SET[BlankLines.Indent] + \
+                                self.continuous_indent * RULES_SET[BlankLines.ContIndent]
 
     def _handle_do_while(self):
         self.blank_line_rules.append((-1, RULES_SET[BlankLines.Max], ''))
@@ -403,6 +485,7 @@ class _CurrentState:
 
         if self.all_tokens[current_pos].type == Tokens.Punctuation and self.all_tokens[current_pos].spec == '{':
 
+            self.indent += 1
             # TODO rules for braces (min value)
             self.blank_line_rules[-1] = (-1, -1, ERROR_SIZE + ' before "{"')
 
@@ -411,10 +494,17 @@ class _CurrentState:
                 self.pos += 1
 
             self.blank_line_rules.append((0, RULES_SET[BlankLines.Max], ERROR_SIZE + ' after "{"'))
+
+            self.len_line = self.indent * RULES_SET[BlankLines.Indent] + \
+                            self.continuous_indent * RULES_SET[BlankLines.ContIndent]
             self.pos += 1
             while self.pos < len(self.all_tokens) and self.all_tokens[self.pos].spec != '}':
                 self._parse_next_token()
+            self.indent = max(self.indent - 1, 0)
             self.blank_line_rules.append((0, RULES_SET[BlankLines.Max], ''))
+
+            self.len_line = self.indent * RULES_SET[BlankLines.Indent] + \
+                            self.continuous_indent * RULES_SET[BlankLines.ContIndent]
 
             # TODO rules for braces (min value)
 
@@ -441,13 +531,14 @@ class _CurrentState:
 
             if self.all_tokens[current_pos].type == Tokens.Punctuation and self.all_tokens[current_pos].spec == '(':
 
+                self.continuous_indent += 1
                 while self.pos < current_pos:
                     self.blank_line_rules.append((-1, RULES_SET[BlankLines.Max], ''))
                     self.pos += 1
 
                 while self.pos < len(self.all_tokens) and self.all_tokens[self.pos].spec != ')':
                     self._parse_next_token()
-
+                self.continuous_indent = max(self.continuous_indent - 1, 0)
                 current_pos = self._next_non_whitespace(self.pos + 1)
 
                 if current_pos >= len(self.all_tokens):
@@ -499,6 +590,8 @@ class _CurrentState:
                 return
 
         if self.all_tokens[current_pos].type == Tokens.Punctuation and self.all_tokens[current_pos].spec == '(':
+
+            self.continuous_indent += 1
             max_val = RULES_SET[BlankLines.Max]
             if was_star and not was_identifier:
                 max_val = -1
@@ -510,7 +603,7 @@ class _CurrentState:
             current_pos += 1
             while self.pos < len(self.all_tokens) and self.all_tokens[self.pos].spec != ')':
                 self._parse_next_token()
-
+            self.continuous_indent = max(self.continuous_indent - 1, 0)
             current_pos = self._next_non_whitespace(self.pos + 1)
 
             if current_pos >= len(self.all_tokens):
@@ -522,6 +615,8 @@ class _CurrentState:
                                       ERROR_SIZE + self._error_rule_text_creation('Blank Lines',
                                                                                   'Minimum Blank Lines',
                                                                                   'Around function')))
+            self.len_line = self.indent * RULES_SET[BlankLines.Indent] + \
+                            self.continuous_indent * RULES_SET[BlankLines.ContIndent]
             # else:
             #     self.blank_line_rules.append((-1, RULES_SET[BlankLines.Max],''))
             self.pos += 1
@@ -529,16 +624,20 @@ class _CurrentState:
 
         if self.all_tokens[current_pos].type == Tokens.Punctuation and self.all_tokens[current_pos].spec == '{':
 
+            self.indent += 1
             # TODO rules for braces (min value)
             while self.pos < current_pos:
                 self.blank_line_rules.append((-1, -1, ERROR_SIZE + ' before "{"'))
                 self.pos += 1
 
             self.blank_line_rules.append((0, RULES_SET[BlankLines.Max], ERROR_SIZE + ' after "{"'))
+
+            self.len_line = self.indent * RULES_SET[BlankLines.Indent] + \
+                            self.continuous_indent * RULES_SET[BlankLines.ContIndent]
             self.pos += 1
             while self.pos < len(self.all_tokens) and self.all_tokens[self.pos].spec != '}':
                 self._parse_next_token()
-
+            self.indent = max(self.indent - 1, 0)
             if was_identifier:
                 self.blank_line_rules.append((RULES_SET[BlankLines.Func], RULES_SET[BlankLines.Max],
                                           ERROR_SIZE + self._error_rule_text_creation('Blank Lines',
@@ -546,6 +645,9 @@ class _CurrentState:
                                                                                       'Around function')))
             else:
                 self.blank_line_rules.append((0, RULES_SET[BlankLines.Max], ''))
+
+            self.len_line = self.indent * RULES_SET[BlankLines.Indent] + \
+                            self.continuous_indent * RULES_SET[BlankLines.ContIndent]
             # TODO rules for braces (min value)
 
             current_pos = self._next_non_whitespace(self.pos + 1)
@@ -559,6 +661,8 @@ class _CurrentState:
                                           ERROR_SIZE + self._error_rule_text_creation('Blank Lines',
                                                                                       'Minimum Blank Lines',
                                                                                       'Around function')))
+            self.len_line = self.indent * RULES_SET[BlankLines.Indent] + \
+                            self.continuous_indent * RULES_SET[BlankLines.ContIndent]
             # else:
             #     self.blank_line_rules.append((-1, RULES_SET[BlankLines.Max],''))
             self.pos += 1
@@ -575,13 +679,14 @@ class _CurrentState:
 
         if self.all_tokens[current_pos].type == Tokens.Punctuation and self.all_tokens[current_pos].spec == '(':
 
+            self.continuous_indent += 1
             while self.pos < current_pos:
                 self.blank_line_rules.append((-1, RULES_SET[BlankLines.Max], ''))
                 self.pos += 1
 
             while self.pos < len(self.all_tokens) and self.all_tokens[self.pos].spec != ')':
                 self._parse_next_token()
-
+            self.continuous_indent = max(self.continuous_indent - 1, 0)
             current_pos = self._next_non_whitespace(self.pos + 1)
 
             if current_pos >= len(self.all_tokens):
@@ -594,12 +699,16 @@ class _CurrentState:
 
         if self.all_tokens[current_pos].type == Tokens.Punctuation and self.all_tokens[current_pos].spec == '{':
 
+            self.indent += 1
             # TODO rules for braces (min value)
             while self.pos < current_pos:
                 self.blank_line_rules.append((-1, -1, ERROR_SIZE + ' before "{"'))
                 self.pos += 1
 
             self.blank_line_rules.append((0, RULES_SET[BlankLines.Max], ERROR_SIZE + ' after "{"'))
+
+            self.len_line = self.indent * RULES_SET[BlankLines.Indent] + \
+                            self.continuous_indent * RULES_SET[BlankLines.ContIndent]
             self.pos += 1
             while self.pos < len(self.all_tokens) and self.all_tokens[self.pos].spec != '}':
                 if self.all_tokens[self.pos].spec == ':':
@@ -609,6 +718,9 @@ class _CurrentState:
                     self._parse_next_token()
             self.blank_line_rules.append((0, RULES_SET[BlankLines.Max], ''))
 
+            self.len_line = self.indent * RULES_SET[BlankLines.Indent] + \
+                            self.continuous_indent * RULES_SET[BlankLines.ContIndent]
+            self.indent = max(self.indent - 1, 0)
             # TODO rules for braces (min value)
 
             current_pos = self._next_non_whitespace(self.pos + 1)
@@ -632,6 +744,7 @@ class _CurrentState:
 
         if self.all_tokens[current_pos].type == Tokens.Punctuation and self.all_tokens[current_pos].spec == '(':
 
+            self.continuous_indent += 1
             while self.pos < current_pos:
                 self.blank_line_rules.append((-1, RULES_SET[BlankLines.Max], ' before "("'))
                 self.pos += 1
@@ -639,7 +752,7 @@ class _CurrentState:
             current_pos += 1
             while self.pos < len(self.all_tokens) and self.all_tokens[self.pos].spec != ')':
                 self._parse_next_token()
-
+            self.continuous_indent = max(self.continuous_indent - 1, 0)
             current_pos = self._next_non_whitespace(self.pos + 1)
 
             if current_pos >= len(self.all_tokens):
@@ -666,17 +779,24 @@ class _CurrentState:
 
         if self.all_tokens[current_pos].type == Tokens.Punctuation and self.all_tokens[current_pos].spec == '{':
 
+            self.indent += 1
             # TODO rules for braces (min value)
             while self.pos < current_pos:
                 self.blank_line_rules.append((-1, -1, ERROR_SIZE + ' before "{"'))
                 self.pos += 1
 
             self.blank_line_rules.append((0, RULES_SET[BlankLines.Max], ERROR_SIZE + ' after "{"'))
+
+            self.len_line = self.indent * RULES_SET[BlankLines.Indent] + \
+                            self.continuous_indent * RULES_SET[BlankLines.ContIndent]
             self.pos += 1
             while self.pos < len(self.all_tokens) and self.all_tokens[self.pos].spec != '}':
                 self._parse_next_token()
-
+            self.indent = max(self.indent - 1, 0)
             self.blank_line_rules.append((0, RULES_SET[BlankLines.Max], ''))
+
+            self.len_line = self.indent * RULES_SET[BlankLines.Indent] + \
+                            self.continuous_indent * RULES_SET[BlankLines.ContIndent]
             # TODO rules for braces (min value)
 
             current_pos = self._next_non_whitespace(self.pos + 1)
@@ -701,16 +821,24 @@ class _CurrentState:
         if self.all_tokens[current_pos].type == Tokens.Punctuation and self.all_tokens[current_pos].spec == '{':
             self.blank_line_rules[-1] = (-1, -1, ERROR_SIZE + ' before "{"')
 
+            self.indent += 1
             # TODO rules for braces (min value)
             while self.pos < current_pos:
                 self.blank_line_rules.append((-1, -1, ERROR_SIZE + ' before "{"'))
                 self.pos += 1
 
             self.blank_line_rules.append((0, RULES_SET[BlankLines.Max], ERROR_SIZE + ' after "{"'))
+
+            self.len_line = self.indent * RULES_SET[BlankLines.Indent] + \
+                            self.continuous_indent * RULES_SET[BlankLines.ContIndent]
             self.pos += 1
             while self.pos < len(self.all_tokens) and self.all_tokens[self.pos].spec != '}':
                 self._parse_next_token()
+            self.indent = max(self.indent - 1, 0)
             self.blank_line_rules.append((0, RULES_SET[BlankLines.Max], ''))
+
+            self.len_line = self.indent * RULES_SET[BlankLines.Indent] + \
+                            self.continuous_indent * RULES_SET[BlankLines.ContIndent]
 
             # TODO rules for braces (min value)
 
@@ -737,6 +865,7 @@ class _CurrentState:
 
             if self.all_tokens[current_pos].type == Tokens.Punctuation and self.all_tokens[current_pos].spec == '(':
 
+                self.continuous_indent += 1
                 while self.pos < current_pos:
                     self.blank_line_rules.append((-1, RULES_SET[BlankLines.Max], ''))
                     self.pos += 1
@@ -744,6 +873,7 @@ class _CurrentState:
                 while self.pos < len(self.all_tokens) and self.all_tokens[self.pos].spec != ')':
                     self._parse_next_token()
 
+                self.continuous_indent = max(self.continuous_indent - 1, 0)
                 current_pos = self._next_non_whitespace(self.pos + 1)
 
                 if current_pos >= len(self.all_tokens):
@@ -759,16 +889,26 @@ class _CurrentState:
             return
 
         if self.all_tokens[current_pos].type == Tokens.Punctuation and self.all_tokens[current_pos].spec == '{':
+
+            self.indent += 1
             # TODO rules for braces (min value)
             while self.pos < current_pos:
                 self.blank_line_rules.append((-1, -1, ERROR_SIZE + ' before "{"'))
                 self.pos += 1
 
             self.blank_line_rules.append((0, RULES_SET[BlankLines.Max], ERROR_SIZE + ' after "{"'))
+
+            self.len_line = self.indent * RULES_SET[BlankLines.Indent] + \
+                            self.continuous_indent * RULES_SET[BlankLines.ContIndent]
             self.pos += 1
             while self.pos < len(self.all_tokens) and self.all_tokens[self.pos].spec != '}':
                 self._parse_next_token()
+
+            self.indent = max(self.indent - 1, 0)
             self.blank_line_rules.append((0, RULES_SET[BlankLines.Max], ''))
+
+            self.len_line = self.indent * RULES_SET[BlankLines.Indent] + \
+                            self.continuous_indent * RULES_SET[BlankLines.ContIndent]
 
             # TODO rules for braces (min value)
 
@@ -790,16 +930,25 @@ class _CurrentState:
 
             if self.all_tokens[current_pos].spec == '{':
 
+                self.indent += 1
                 # TODO rules for braces (min value)
                 while self.pos < current_pos:
                     self.blank_line_rules.append((-1, -1, ERROR_SIZE + ' before "{"'))
                     self.pos += 1
 
                 self.blank_line_rules.append((0, RULES_SET[BlankLines.Max], ERROR_SIZE + ' after "{"'))
+
+                self.len_line = self.indent * RULES_SET[BlankLines.Indent] + \
+                                self.continuous_indent * RULES_SET[BlankLines.ContIndent]
                 self.pos += 1
                 while self.pos < len(self.all_tokens) and self.all_tokens[self.pos].spec != '}':
                     self._parse_next_token()
+
+                self.indent = max(self.indent - 1, 0)
                 self.blank_line_rules.append((0, RULES_SET[BlankLines.Max], ''))
+
+                self.len_line = self.indent * RULES_SET[BlankLines.Indent] + \
+                                self.continuous_indent * RULES_SET[BlankLines.ContIndent]
         else:
             self.blank_line_rules.append((-1, RULES_SET[BlankLines.Max], ''))
             self.pos += 1
@@ -831,25 +980,35 @@ class _CurrentState:
                                           ERROR_SIZE + self._error_rule_text_creation('Blank Lines',
                                                                                       'Minimum Blank Lines',
                                                                                       'Around class')))
+            self.len_line = self.indent * RULES_SET[BlankLines.Indent] + \
+                            self.continuous_indent * RULES_SET[BlankLines.ContIndent]
             self.pos += 1
             return
 
         if self.all_tokens[current_pos].type == Tokens.Punctuation and self.all_tokens[current_pos].spec == '{':
 
+            self.indent += 1
             # TODO rules for braces (min value)
             while self.pos < current_pos:
                 self.blank_line_rules.append((-1, -1, ERROR_SIZE + ' before "{"'))
                 self.pos += 1
 
             self.blank_line_rules.append((0, RULES_SET[BlankLines.Max], ERROR_SIZE + ' after "{"'))
+
+            self.len_line = self.indent * RULES_SET[BlankLines.Indent] + \
+                            self.continuous_indent * RULES_SET[BlankLines.ContIndent]
             self.pos += 1
             while self.pos < len(self.all_tokens) and self.all_tokens[self.pos].spec != '}':
                 self._parse_next_token(Scope.Class)
 
+            self.indent = max(self.indent - 1, 0)
             self.blank_line_rules.append((RULES_SET[BlankLines.Class], RULES_SET[BlankLines.Max],
                                           ERROR_SIZE + self._error_rule_text_creation('Blank Lines',
                                                                                       'Minimum Blank Lines',
                                                                                       'Around class')))
+
+            self.len_line = self.indent * RULES_SET[BlankLines.Indent] + \
+                            self.continuous_indent * RULES_SET[BlankLines.ContIndent]
             # TODO rules for braces (min value)
 
             current_pos = self._next_non_whitespace(self.pos + 1)
@@ -862,6 +1021,8 @@ class _CurrentState:
                                           ERROR_SIZE + self._error_rule_text_creation('Blank Lines',
                                                                                       'Minimum Blank Lines',
                                                                                       'Around class')))
+            self.len_line = self.indent * RULES_SET[BlankLines.Indent] + \
+                            self.continuous_indent * RULES_SET[BlankLines.ContIndent]
             self.pos += 1
             return
 
@@ -896,6 +1057,9 @@ class JsFormatter:
         RULES_SET[BlankLines.Field] = self._config['Blank Lines']['Minimum Blank Lines']['Around field']
         RULES_SET[BlankLines.Method] = self._config['Blank Lines']['Minimum Blank Lines']['Around method']
         RULES_SET[BlankLines.Func] = self._config['Blank Lines']['Minimum Blank Lines']['Around function']
+        RULES_SET[BlankLines.MaxLen] = self._config['Wrapping and Braces']['Hard wrap at']
+        RULES_SET[BlankLines.Indent] = self._config['Tabs and Indents']['Indent']
+        RULES_SET[BlankLines.ContIndent] = self._config['Tabs and Indents']['Continuation indent']
 
     def process_js_file(self, path_to_file):
         lexer = Lexer()
@@ -904,6 +1068,8 @@ class JsFormatter:
         self._lexer_error_list = lexer.get_error_tokens_list()
         self._symbol_table = lexer.get_symbol_table()
         state = _CurrentState()
+        state.symbol_table = self._symbol_table
+
         state.check_blank_lines(0)
         state.enter_number = (-1, RULES_SET[BlankLines.Max])
         state.pos = 0
