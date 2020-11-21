@@ -5,6 +5,8 @@ from os.path import isfile, join, splitext
 import json
 from enum import Enum
 
+from tornado.routing import Rule
+
 from Lexer import Lexer
 from DictTokenTypes import Tokens, Scope, BlankLines
 from TokenClasses import Token, WrongToken
@@ -30,6 +32,7 @@ _MAX_BLANK_LINES = 2
 
 class _CurrentState:
     all_tokens = []
+    blank_line_rules = []
 
     def __init__(self):
         self.pos = 0
@@ -40,6 +43,408 @@ class _CurrentState:
         self.empty_line_counter = 0
         self.outer_scope = Scope.GeneralScope
         self.enter_number = (-1, -1)
+
+    def check_blank_lines(self, start_pos):
+        self.pos = start_pos
+        while self.pos < len(self.all_tokens):
+            self._parse_next_token()
+
+    def _parse_next_token(self):
+        current_token = self.all_tokens[self.pos]
+        if current_token.type == Tokens.Keyword:
+            self._handle_keywords()
+        elif current_token.type == Tokens.Punctuation:
+            self._handle_punctuation()
+        current_token = self.all_tokens[self.pos]
+        if is_whitespace_token(current_token.type):
+            self.blank_line_rules.append((-1, RULES_SET[BlankLines.Max], ''))
+            self.pos += 1
+        else:
+            self._check_what_is_next()
+
+    def _handle_punctuation(self):
+        prev_pos = self._prev_non_whitespace(self.pos - 1)
+        if prev_pos < 0:
+            return
+        self.blank_line_rules.append(self.blank_line_rules[prev_pos])
+        self.blank_line_rules[prev_pos] = (-1, RULES_SET[BlankLines.Max],'')
+
+    def _error_rule_text_creation(self, main_rule, sub_rule, rule_name):
+        return ". Rule: " + main_rule + " -> " + sub_rule + " -> " + rule_name + "."
+
+    def _check_what_is_next(self):
+        next_pos = self._next_non_whitespace(self.pos + 1)
+        if next_pos >= len(self.all_tokens):
+            if len(self.blank_line_rules) == self.pos:
+                self.blank_line_rules.append((-1, RULES_SET[BlankLines.Max], ''))
+            self.pos += 1
+            return
+
+        if self.all_tokens[next_pos].spec == '}':
+            if len(self.blank_line_rules) == self.pos:
+                self.pos += 1
+                self.blank_line_rules.append((0, RULES_SET[BlankLines.Max], ERROR_SIZE + ' before "}"'))
+            else:
+                self.pos += 1
+                self.blank_line_rules[-1] = (0, RULES_SET[BlankLines.Max], ERROR_SIZE + ' before "}"')
+        elif self.all_tokens[next_pos].spec == 'function':
+            next_next_pos = self._next_non_whitespace(next_pos + 1)
+            if next_next_pos < len(self.all_tokens) and self.all_tokens[next_next_pos].spec == '*':
+                next_next_pos = self._next_non_whitespace(next_next_pos + 1)
+
+            if self.all_tokens[self.pos].type == Tokens.MultiLineComment or \
+                    self.all_tokens[self.pos].type == Tokens.SingleLineComment:
+                prev_token = self._prev_non_whitespace(self.pos - 1)
+                enter_number = (0, 0, ERROR_SIZE + ' between comment and func')
+                if prev_token >= 0 and self.blank_line_rules[prev_token][0] < RULES_SET[BlankLines.Func]:
+                    self.blank_line_rules[prev_token] = (RULES_SET[BlankLines.Func], RULES_SET[BlankLines.Max],
+                                                         ERROR_SIZE + self._error_rule_text_creation('Blank Lines',
+                                                                                                     'Minimum Blank Lines',
+                                                                                                     'Around function'))
+            elif self.all_tokens[self.pos].type == Tokens.Identifier or self.all_tokens[self.pos].type == Tokens.Keyword or \
+                    self.all_tokens[self.pos].type != Tokens.Operators or self.all_tokens[self.pos].spec is not None \
+                    and self.all_tokens[self.pos].spec != 'return' and self.all_tokens[self.pos].spec not in '{([:' \
+                    and len(self.all_tokens) > next_next_pos and self.all_tokens[next_next_pos].type == Tokens.Identifier:
+                enter_number = (RULES_SET[BlankLines.Func], RULES_SET[BlankLines.Max],
+                                ERROR_SIZE + self._error_rule_text_creation('Blank Lines',
+                                                                            'Minimum Blank Lines',
+                                                                            'Around function'))
+            else:
+                enter_number = (-1, RULES_SET[BlankLines.Max], '')
+
+            if len(self.blank_line_rules) == self.pos:
+                self.pos += 1
+                self.blank_line_rules.append(enter_number)
+            else:
+                self.pos += 1
+                if enter_number[0] > self.blank_line_rules[-1][0]:
+                    self.blank_line_rules[-1] = enter_number
+        else:
+            if len(self.blank_line_rules) == self.pos:
+                self.blank_line_rules.append((-1, RULES_SET[BlankLines.Max], ''))
+            self.pos += 1
+
+    def _handle_keywords(self):
+        current_token = self.all_tokens[self.pos]
+        if current_token.spec == 'import':
+            self._handle_imports()
+        elif current_token.spec == 'function':
+            self._handle_functions()
+        elif current_token.spec == 'if' or current_token.spec == 'for' or current_token.spec == 'while':
+            self._handle_common_statements(current_token.spec)
+        # elif current_token.spec == 'async':
+        #     self._handle_async()
+        elif current_token.spec == 'do':
+            self._handle_do_while()
+        # elif current_token.spec == 'try':
+        #     self._handle_try_catch()
+        # elif current_token.spec == 'switch':
+        #     self._handle_switch()
+        # elif current_token.spec == 'class':
+        #     self._handle_class()
+        else:
+            self._check_what_is_next()
+
+    def _handle_common_statements(self, spec):
+        self.blank_line_rules.append((-1, RULES_SET[BlankLines.Max], ''))
+        self.pos += 1
+        current_pos = self._next_non_whitespace(self.pos)
+
+        if current_pos >= len(self.all_tokens):
+            self.pos += 1
+            return
+
+        if self.all_tokens[current_pos].type == Tokens.Punctuation and self.all_tokens[current_pos].spec == '(':
+
+            while self.pos < current_pos:
+                self.blank_line_rules.append((-1, RULES_SET[BlankLines.Max], ''))
+                self.pos += 1
+
+            while self.pos < len(self.all_tokens) and self.all_tokens[self.pos].spec != ')':
+                self._parse_next_token()
+
+            current_pos = self._next_non_whitespace(self.pos + 1)
+
+            if current_pos >= len(self.all_tokens):
+                return
+
+        else:
+            self.blank_line_rules.append((-1, RULES_SET[BlankLines.Max], ''))
+            self.pos += 1
+            return
+
+        if self.all_tokens[current_pos].type == Tokens.Punctuation and self.all_tokens[current_pos].spec == '{':
+
+            # TODO rules for braces (min value)
+            while self.pos < current_pos:
+                self.blank_line_rules.append((-1, -1, ERROR_SIZE + ' before "{"'))
+                self.pos += 1
+
+            self.blank_line_rules.append((0, RULES_SET[BlankLines.Max], ERROR_SIZE + ' after "{"'))
+            self.pos += 1
+            while self.pos < len(self.all_tokens) and self.all_tokens[self.pos].spec != '}':
+                self._parse_next_token()
+            self.blank_line_rules.append((-1, RULES_SET[BlankLines.Max], ''))
+
+            # TODO rules for braces (min value)
+
+            current_pos = self._next_non_whitespace(self.pos + 1)
+
+            if current_pos >= len(self.all_tokens):
+                return
+
+        else:
+            self.blank_line_rules.append((-1, RULES_SET[BlankLines.Max], ''))
+            self.pos += 1
+            return
+
+        if spec == 'if' and self.all_tokens[current_pos].spec == 'else':
+            self.blank_line_rules[-1] = (-1, -1, ERROR_SIZE + ' before "else"')
+            self.pos += 1
+            while self.pos < current_pos:
+                self.blank_line_rules.append((-1, -1, ERROR_SIZE + ' before "else"'))
+                self.pos += 1
+
+            current_pos = self._next_non_whitespace(current_pos + 1)
+            if current_pos >= len(self.all_tokens):
+                return
+
+            if self.all_tokens[current_pos].spec == '{':
+
+                # TODO rules for braces (min value)
+                while self.pos < current_pos:
+                    self.blank_line_rules.append((-1, -1, ERROR_SIZE + ' before "{"'))
+                    self.pos += 1
+
+                self.blank_line_rules.append((0, RULES_SET[BlankLines.Max], ERROR_SIZE + ' after "{"'))
+                self.pos += 1
+                while self.pos < len(self.all_tokens) and self.all_tokens[self.pos].spec != '}':
+                    self._parse_next_token()
+                self.blank_line_rules.append((-1, RULES_SET[BlankLines.Max], ''))
+
+    def _handle_imports(self):
+        current_pos = self.pos + 1
+        while current_pos < len(self.all_tokens) and self.all_tokens[current_pos].type != Tokens.Enter \
+                and self.all_tokens[current_pos].spec != 'import' and self.all_tokens[current_pos].spec != ';':
+            current_pos += 1
+
+        if current_pos >= len(self.all_tokens):
+            return
+
+        next_start = current_pos
+        current_pos -= 1
+
+        while current_pos > self.pos and (self.all_tokens[current_pos].type == Tokens.Space or
+                                          self.all_tokens[current_pos].type == Tokens.Tab):
+            current_pos -= 1
+
+        while self.pos < current_pos:
+            self.blank_line_rules.append((-1, RULES_SET[BlankLines.Max], ''))
+            self.pos += 1
+
+        if self.all_tokens[next_start].spec == 'import':
+            self.blank_line_rules.append((0, 0, ERROR_SIZE + ' between imports'))
+        elif self.all_tokens[next_start].type == Tokens.Enter:
+            current_pos = self._next_non_whitespace(current_pos + 1)
+            if self.all_tokens[current_pos].spec == 'import':
+                self.blank_line_rules.append((0, 0, ERROR_SIZE + ' between imports'))
+            else:
+                self.blank_line_rules.append((RULES_SET[BlankLines.Imports], RULES_SET[BlankLines.Max],
+                                              ERROR_SIZE + self._error_rule_text_creation('Blank Lines',
+                                                                                          'Minimum Blank Lines',
+                                                                                          'After imports')))
+        else:
+            current_pos = self._next_non_whitespace(current_pos + 1)
+            if self.all_tokens[current_pos].spec == 'import':
+                self.blank_line_rules.append((0, 0, ERROR_SIZE + ' between imports'))
+            else:
+                self.blank_line_rules.append((-1, RULES_SET[BlankLines.Max], ''))
+                self.pos += 1
+                self.blank_line_rules.append((RULES_SET[BlankLines.Imports], RULES_SET[BlankLines.Max],
+                                              ERROR_SIZE + self._error_rule_text_creation('Blank Lines',
+                                                                                          'Minimum Blank Lines',
+                                                                                          'After imports')))
+
+    def _handle_do_while(self):
+        self.blank_line_rules.append((-1, RULES_SET[BlankLines.Max], ''))
+        self.pos += 1
+        current_pos = self._next_non_whitespace(self.pos)
+
+        if current_pos >= len(self.all_tokens):
+            self.pos += 1
+            return
+
+        if self.all_tokens[current_pos].type == Tokens.Punctuation and self.all_tokens[current_pos].spec == '{':
+
+            # TODO rules for braces (min value)
+            while self.pos < current_pos:
+                self.blank_line_rules.append((-1, -1, ERROR_SIZE + ' before "{"'))
+                self.pos += 1
+
+            self.blank_line_rules.append((0, RULES_SET[BlankLines.Max], ERROR_SIZE + ' after "{"'))
+            self.pos += 1
+            while self.pos < len(self.all_tokens) and self.all_tokens[self.pos].spec != '}':
+                self._parse_next_token()
+            self.blank_line_rules.append((-1, RULES_SET[BlankLines.Max], ''))
+
+            # TODO rules for braces (min value)
+
+            current_pos = self._next_non_whitespace(self.pos + 1)
+
+            if current_pos >= len(self.all_tokens):
+                return
+
+        else:
+            self.blank_line_rules.append((-1, RULES_SET[BlankLines.Max], ''))
+            self.pos += 1
+            return
+
+        if self.all_tokens[current_pos].spec == 'while':
+            self.blank_line_rules[-1] = (-1, -1, ERROR_SIZE + ' before "while"')
+            self.pos += 1
+            while self.pos < current_pos:
+                self.blank_line_rules.append((-1, -1, ERROR_SIZE + ' before "while"'))
+                self.pos += 1
+
+            current_pos = self._next_non_whitespace(current_pos + 1)
+            if current_pos >= len(self.all_tokens):
+                return
+
+            if self.all_tokens[current_pos].type == Tokens.Punctuation and self.all_tokens[current_pos].spec == '(':
+
+                while self.pos < current_pos:
+                    self.blank_line_rules.append((-1, RULES_SET[BlankLines.Max], ''))
+                    self.pos += 1
+
+                while self.pos < len(self.all_tokens) and self.all_tokens[self.pos].spec != ')':
+                    self._parse_next_token()
+
+                current_pos = self._next_non_whitespace(self.pos + 1)
+
+                if current_pos >= len(self.all_tokens):
+                    return
+
+            else:
+                self.blank_line_rules.append((-1, RULES_SET[BlankLines.Max], ''))
+                self.pos += 1
+                return
+
+    def _handle_functions(self):
+        self.blank_line_rules.append((-1, RULES_SET[BlankLines.Max], ''))
+        self.pos += 1
+        current_pos = self._next_non_whitespace(self.pos)
+
+        if current_pos >= len(self.all_tokens):
+            self.pos += 1
+            return
+
+        was_star = False
+        if self.all_tokens[current_pos].spec == '*':
+            was_star = True
+            self.blank_line_rules[-1] = (-1, -1, ERROR_SIZE + ' before *')
+            while self.pos < current_pos:
+                self.blank_line_rules.append((-1, -1, ERROR_SIZE + ' before *'))
+                self.pos += 1
+
+            current_pos = self._next_non_whitespace(current_pos + 1)
+
+            if current_pos >= len(self.all_tokens):
+                return
+
+        was_identifier = False
+        if self.all_tokens[current_pos].type == Tokens.Identifier:
+            was_identifier = True
+            max_val = RULES_SET[BlankLines.Max]
+            if was_star:
+                max_val = -1
+
+            while self.pos < current_pos:
+                self.blank_line_rules.append((-1, max_val, ERROR_SIZE + ' before func name'))
+                self.pos += 1
+
+            current_pos += 1
+
+            current_pos = self._next_non_whitespace(current_pos)
+
+            if current_pos >= len(self.all_tokens):
+                return
+
+        if self.all_tokens[current_pos].type == Tokens.Punctuation and self.all_tokens[current_pos].spec == '(':
+            max_val = RULES_SET[BlankLines.Max]
+            if was_star and not was_identifier:
+                max_val = -1
+
+            while self.pos < current_pos:
+                self.blank_line_rules.append((-1, max_val, ' before "("'))
+                self.pos += 1
+
+            current_pos += 1
+            while self.pos < len(self.all_tokens) and self.all_tokens[self.pos].spec != ')':
+                self.pos += 1
+                self.blank_line_rules.append((-1, RULES_SET[BlankLines.Max], ''))
+
+            current_pos = self._next_non_whitespace(self.pos + 1)
+
+            if current_pos >= len(self.all_tokens):
+                return
+
+        else:
+            # if was_identifier:
+            self.blank_line_rules.append((RULES_SET[BlankLines.Func], RULES_SET[BlankLines.Max],
+                                      ERROR_SIZE + self._error_rule_text_creation('Blank Lines',
+                                                                                  'Minimum Blank Lines',
+                                                                                  'Around function')))
+            # else:
+            #     self.blank_line_rules.append((-1, RULES_SET[BlankLines.Max],''))
+            self.pos += 1
+            return
+
+        if self.all_tokens[current_pos].type == Tokens.Punctuation and self.all_tokens[current_pos].spec == '{':
+
+            # TODO rules for braces (min value)
+            while self.pos < current_pos:
+                self.blank_line_rules.append((-1, -1, ERROR_SIZE + ' before "{"'))
+                self.pos += 1
+
+            self.blank_line_rules.append((0, RULES_SET[BlankLines.Max], ERROR_SIZE + ' after "{"'))
+            self.pos += 1
+            while self.pos < len(self.all_tokens) and self.all_tokens[self.pos].spec != '}':
+                self._parse_next_token()
+
+            if was_identifier:
+                self.blank_line_rules.append((RULES_SET[BlankLines.Func], RULES_SET[BlankLines.Max],
+                                          ERROR_SIZE + self._error_rule_text_creation('Blank Lines',
+                                                                                      'Minimum Blank Lines',
+                                                                                      'Around function')))
+            else:
+                self.blank_line_rules.append((-1, RULES_SET[BlankLines.Max],''))
+            # TODO rules for braces (min value)
+
+            current_pos = self._next_non_whitespace(self.pos + 1)
+
+            if current_pos >= len(self.all_tokens):
+                return
+
+        else:
+            # if was_identifier:
+            self.blank_line_rules.append((RULES_SET[BlankLines.Func], RULES_SET[BlankLines.Max],
+                                          ERROR_SIZE + self._error_rule_text_creation('Blank Lines',
+                                                                                      'Minimum Blank Lines',
+                                                                                      'Around function')))
+            # else:
+            #     self.blank_line_rules.append((-1, RULES_SET[BlankLines.Max],''))
+            self.pos += 1
+            return
+
+    def _next_non_whitespace(self, pos):
+        while pos < len(self.all_tokens) and is_whitespace_token(self.all_tokens[pos].type):
+            pos += 1
+        return pos
+
+    def _prev_non_whitespace(self, pos):
+        while pos >= 0 and is_whitespace_token(self.all_tokens[pos].type):
+            pos -= 1
+        return pos
 
 
 class JsFormatter:
@@ -70,13 +475,16 @@ class JsFormatter:
         self._lexer_error_list = lexer.get_error_tokens_list()
         self._symbol_table = lexer.get_symbol_table()
         state = _CurrentState()
-        state.enter_number = (-1, RULES_SET[BlankLines.Max])
 
+        state.check_blank_lines(0)
+
+        state.enter_number = (-1, RULES_SET[BlankLines.Max])
+        state.pos = 0
         while state.pos < len(state.all_tokens) and is_whitespace_token(state.all_tokens[state.pos].type):
             state.pos += 1
 
         if state.pos != 0:
-            self._invalid_token.append(WrongToken(message="Whitespaces iat the beginning of the file",
+            self._invalid_token.append(WrongToken(message="Whitespaces at the beginning of the file",
                                                   token=state.all_tokens[state.pos]))
 
         while state.pos < len(state.all_tokens):
@@ -86,13 +494,13 @@ class JsFormatter:
         current_token = state.all_tokens[state.pos]
         prev_token = self._get_prev_token(state)
         was_comma = False
-        if (prev_token.type == Tokens.Punctuation and prev_token.spec == ',' or
-                current_token.type == Tokens.Punctuation and current_token.spec == ',') and \
-                (where is not None and where.value > Scope.Do.value and state.outer_scope != Scope.ArrayBrackets and
-                 state.outer_scope != Scope.IndexAccessBrackets and state.outer_scope != Scope.PropertyNameValue and
-                 state.outer_scope != Scope.ObjectLiteralBrace):
-            was_comma = True
-            state.continuous_indent += 1
+        # if (prev_token.type == Tokens.Punctuation and prev_token.spec == ',' or
+        #     current_token.type == Tokens.Punctuation and current_token.spec == ',') and \
+        #         (where is not None and where.value > Scope.Do.value and state.outer_scope != Scope.ArrayBrackets and
+        #          state.outer_scope != Scope.IndexAccessBrackets and state.outer_scope != Scope.PropertyNameValue and
+        #          state.outer_scope != Scope.ObjectLiteralBrace):
+        #     was_comma = True
+        #     state.continuous_indent += 1
 
         if current_token.type == Tokens.Keyword:
             self._handle_keywords(state, where)
@@ -152,13 +560,16 @@ class JsFormatter:
 
         space_number, error_message = self._get_check_tokens_result(state, prev_token, next_token, where)
 
+        enter_number = (max(state.enter_number[0], state.blank_line_rules[state.pos][0]),
+                        min(state.enter_number[1], state.blank_line_rules[state.pos][1]))
         state.pos += 1
         self._handle_whitespace_between_tokens(
             state,
             self._rule_whitespace(space_number=space_number,
-                                  enter_number=state.enter_number,
+                                  enter_number=enter_number,
                                   error_message=error_message,
-                                  error_blank=error_blank))
+                                  error_blank_max=error_blank,
+                                  error_blank_min=state.blank_line_rules[state.pos-1][-1]))
 
     def _error_rule_text_creation(self, main_rule, sub_rule, rule_name):
         return ". Rule: " + main_rule + " -> " + sub_rule + " -> " + rule_name + "."
@@ -245,7 +656,7 @@ class JsFormatter:
             elif next_token.spec == ')' and not prev_token.is_fake():
                 state.continuous_indent = max(state.continuous_indent - 1, 0)
 
-            if where == Scope.FuncDeclaration:
+            if where == Scope.FuncDeclaration or where == Scope.FuncExpression:
                 error_text += self._error_rule_text_creation("Spaces", "Within", "Function declaration parentheses")
                 return int(self._config['Spaces']['Within']['Function declaration parentheses']), error_text
 
@@ -399,7 +810,8 @@ class JsFormatter:
 
         # Spaces -> Around operators -> for unary not
         if next_token.type == Tokens.Operators and next_token.spec in Scope.BeforeUnaryNot.value:
-            error_text += self._error_rule_text_creation("Spaces", "Around operators", "Before unary 'not' (!) and '!!'")
+            error_text += self._error_rule_text_creation("Spaces", "Around operators",
+                                                         "Before unary 'not' (!) and '!!'")
             return int(self._config["Spaces"]["Around operators"]["Before unary 'not' (!) and '!!'"]), error_text
 
         # Spaces -> Ternary If
@@ -527,7 +939,8 @@ class JsFormatter:
         return self._check_general_space_for_prev_next_token(state, fake_prev, next_token, where)
 
     def _get_check_tokens_result(self, state, prev_token, next_token, where):
-        space_number, error_message = self._check_general_space_for_prev_next_token(state, prev_token, next_token, where)
+        space_number, error_message = self._check_general_space_for_prev_next_token(state, prev_token, next_token,
+                                                                                    where)
         save_space, save_error = -1, ERROR_SIZE + " after token"
         if space_number == 1:
             return space_number, error_message
@@ -565,11 +978,12 @@ class JsFormatter:
 
         return 1, save_error
 
-    def _rule_whitespace(self, space_number, enter_number, error_message, error_blank):
+    def _rule_whitespace(self, space_number, enter_number, error_message, error_blank_max, error_blank_min=''):
         return {Tokens.Space: space_number,
                 Tokens.Enter: enter_number,
                 "error_message": error_message,
-                "error_blank": error_blank}
+                "error_blank_max": error_blank_max,
+                "error_blank_min": error_blank_min}
 
     def _end_of_file(self, state, pos):
         state.pos = pos + 1
@@ -577,7 +991,7 @@ class JsFormatter:
                                                self._rule_whitespace(space_number=0,
                                                                      enter_number=(-1, RULES_SET[BlankLines.Max]),
                                                                      error_message=ERROR_SIZE + " after token",
-                                                                     error_blank=ERROR_SIZE + RULE_BLANK_MAX))
+                                                                     error_blank_max=ERROR_SIZE + RULE_BLANK_MAX))
 
     def _handle_whitespace_between_tokens2(self, state, whitespace_rule):
         was_error = False
@@ -614,7 +1028,7 @@ class JsFormatter:
             no_errors = False
             if counter[Tokens.Enter] > max(whitespace_rule[Tokens.Enter][1], whitespace_rule[Tokens.Enter][0]) or \
                     counter[Tokens.Enter] < whitespace_rule[Tokens.Enter][0]:
-                self._invalid_token.append(WrongToken(message=whitespace_rule['error_blank'],
+                self._invalid_token.append(WrongToken(message=whitespace_rule['error_blank_max'],
                                                       token=state.all_tokens[declaration_start - 1]))
                 no_errors = True
                 if counter[Tokens.Enter] < whitespace_rule[Tokens.Enter][0]:
@@ -768,13 +1182,18 @@ class JsFormatter:
                     index = cur_pos + 1
 
                 counter[Tokens.Enter] -= 1
-        elif whitespace_rule[Tokens.Enter][0] <= whitespace_rule[Tokens.Enter][1] < counter[Tokens.Enter] or\
+        elif whitespace_rule[Tokens.Enter][0] <= whitespace_rule[Tokens.Enter][1] < counter[Tokens.Enter] or \
                 whitespace_rule[Tokens.Enter][1] < whitespace_rule[Tokens.Enter][0] < counter[Tokens.Enter]:
 
-            self._invalid_token.append(WrongToken(message=whitespace_rule['error_blank'],
-                                                  token=state.all_tokens[declaration_start - 1]))
+            if whitespace_rule[Tokens.Enter][0] == whitespace_rule[Tokens.Enter][1] and \
+                    whitespace_rule['error_blank_min'] != '':
+                self._invalid_token.append(WrongToken(message=whitespace_rule['error_blank_min'],
+                                                      token=state.all_tokens[declaration_start - 1]))
+            else:
+                self._invalid_token.append(WrongToken(message=whitespace_rule['error_blank_max'],
+                                                      token=state.all_tokens[declaration_start - 1]))
 
-            if (was_good_space or was_bad_space) and max(whitespace_rule[Tokens.Enter]) > 0:
+            if (was_good_space or was_bad_space) and max(whitespace_rule[Tokens.Enter]) > 0 and counter[Tokens.Enter] != 0:
                 self._invalid_token.append(WrongToken(message=ERROR_SIZE + " in the end of line",
                                                       token=state.all_tokens[declaration_start - 1]))
                 if was_good_space:
@@ -816,7 +1235,7 @@ class JsFormatter:
                 counter[Tokens.Enter] -= 1
                 state.row_offset -= 1
         elif counter[Tokens.Enter] < whitespace_rule[Tokens.Enter][0]:
-            if was_good_space or was_bad_space:
+            if (was_good_space or was_bad_space) and counter[Tokens.Enter] != 0:
                 self._invalid_token.append(WrongToken(message=ERROR_SIZE + " in the end of line",
                                                       token=state.all_tokens[declaration_start - 1]))
                 if was_good_space:
@@ -827,7 +1246,7 @@ class JsFormatter:
                     if index == len(state.all_tokens):
                         return
 
-            self._invalid_token.append(WrongToken(message=whitespace_rule['error_blank'],
+            self._invalid_token.append(WrongToken(message=whitespace_rule['error_blank_min'],
                                                   token=state.all_tokens[declaration_start - 1]))
 
             spaces_row = [Token(token_type=Tokens.Enter,
@@ -1048,14 +1467,17 @@ class JsFormatter:
             where = Scope.IndexAccessBrackets
             space_number, error_text = self._get_check_tokens_result(state, prev_token, current_token, where)
 
+            enter_number = (max(-1, state.blank_line_rules[state.pos][0]),
+                            min(RULES_SET[BlankLines.Max], state.blank_line_rules[state.pos][1]))
             state.pos += 1
 
             self._handle_whitespace_between_tokens(
                 state,
                 self._rule_whitespace(space_number=0,
-                                      enter_number=(-1, RULES_SET[BlankLines.Max]),
+                                      enter_number=enter_number,
                                       error_message=error_text,
-                                      error_blank=ERROR_SIZE + RULE_BLANK_MAX))
+                                      error_blank_max=ERROR_SIZE + RULE_BLANK_MAX,
+                                      error_blank_min=state.blank_line_rules[state.pos-1][-1]))
 
             self._token.append(state.all_tokens[state.pos])
             prev_token = state.all_tokens[state.pos]
@@ -1064,13 +1486,16 @@ class JsFormatter:
                 return
 
             space_number, error_text = self._get_check_tokens_result(state, prev_token, current_token, where)
+            enter_number = (max(-1, state.blank_line_rules[state.pos][0]),
+                            min(RULES_SET[BlankLines.Max], state.blank_line_rules[state.pos][1]))
             state.pos += 1
             self._handle_whitespace_between_tokens(
                 state,
                 self._rule_whitespace(space_number=space_number,
-                                      enter_number=(-1, RULES_SET[BlankLines.Max]),
+                                      enter_number=enter_number,
                                       error_message=error_text,
-                                      error_blank=ERROR_SIZE + RULE_BLANK_MAX))
+                                      error_blank_max=ERROR_SIZE + RULE_BLANK_MAX,
+                                      error_blank_min=state.blank_line_rules[state.pos-1][-1]))
 
             prev_outer_scope = state.outer_scope
             state.outer_scope = where
@@ -1181,14 +1606,16 @@ class JsFormatter:
             was_star = True
 
             space_number, error_text = self._get_check_tokens_result(state, prev_token, current_token, where)
-
+            enter_number = (max(-1, state.blank_line_rules[state.pos][0]),
+                            min(-1, state.blank_line_rules[state.pos][1]))
             state.pos += 1
             self._handle_whitespace_between_tokens(
                 state,
                 self._rule_whitespace(space_number=space_number,
-                                      enter_number=(-1, -1),
+                                      enter_number=enter_number,
                                       error_message=error_text,
-                                      error_blank=ERROR_SIZE + " after token"))
+                                      error_blank_max=ERROR_SIZE + " after token",
+                                      error_blank_min=state.blank_line_rules[state.pos-1][-1]))
             declaration_start = state.pos
             self._token.append(state.all_tokens[state.pos])
             prev_token = state.all_tokens[state.pos]
@@ -1205,14 +1632,16 @@ class JsFormatter:
                 enter_number = (-1, -1)
             else:
                 enter_number = (-1, RULES_SET[BlankLines.Max])
-
+            enter_number = (max(enter_number[0], state.blank_line_rules[state.pos][0]),
+                            min(enter_number[1], state.blank_line_rules[state.pos][1]))
             state.pos += 1
             self._handle_whitespace_between_tokens(
                 state,
                 self._rule_whitespace(space_number=space_number,
                                       enter_number=enter_number,
                                       error_message=error_text,
-                                      error_blank=ERROR_SIZE + " after token"))
+                                      error_blank_max=ERROR_SIZE + " after token",
+                                      error_blank_min=state.blank_line_rules[state.pos-1][-1]))
             declaration_start = state.pos
             self._token.append(state.all_tokens[state.pos])
             prev_token = state.all_tokens[state.pos]
@@ -1261,15 +1690,16 @@ class JsFormatter:
         if next_token.type == Tokens.Identifier:
             was_identifier = True
             space_number, error_text = self._get_check_tokens_result(state, prev_token, next_token, where)
-            enter_number = (-1, RULES_SET[BlankLines.Max])
-
+            enter_number = (max(-1, state.blank_line_rules[state.pos][0]),
+                            min(RULES_SET[BlankLines.Max], state.blank_line_rules[state.pos][1]))
             state.pos += 1
             self._handle_whitespace_between_tokens(
                 state,
                 self._rule_whitespace(space_number=space_number,
                                       enter_number=enter_number,
                                       error_message=error_text,
-                                      error_blank=ERROR_SIZE + " after token"))
+                                      error_blank_max=ERROR_SIZE + " after token",
+                                      error_blank_min=state.blank_line_rules[state.pos-1][-1]))
             declaration_start = state.pos
             self._token.append(state.all_tokens[state.pos])
             prev_token = state.all_tokens[state.pos]
@@ -1281,22 +1711,23 @@ class JsFormatter:
             return
 
         if next_token.type == Tokens.Punctuation and next_token.spec == '{':
-
             space_number, error_text = self._get_check_tokens_result(state, prev_token, next_token, where)
             self._handle_class_bkt(state, space_number, error_text, declaration_start, next_token,
                                    RULES_SET[BlankLines.Max], where, '}')
 
     def _handle_class_bkt(self, state, space_number, rule_error_text, declaration_start, current_token,
-                           max_blank_lines, where, bkt_type):
+                          max_blank_lines, where, bkt_type):
 
+        enter_number = (max(-1, state.blank_line_rules[state.pos][0]),
+                        min(-1, state.blank_line_rules[state.pos][1]))
         state.pos += 1
-        enter_number = (-1, -1)
         self._handle_whitespace_between_tokens(
             state,
             self._rule_whitespace(space_number=space_number,
                                   enter_number=enter_number,
                                   error_message=rule_error_text,
-                                  error_blank=ERROR_SIZE + RULE_BLANK_MAX))
+                                  error_blank_max=ERROR_SIZE + RULE_BLANK_MAX,
+                                  error_blank_min=state.blank_line_rules[state.pos-1][-1]))
 
         current_token = self._get_next_token(state)
         if current_token.is_fake():
@@ -1329,13 +1760,16 @@ class JsFormatter:
 
             space_number, error_text = self._get_check_tokens_result(state, prev_token, current_token, where)
 
+            enter_number = (max(-1, state.blank_line_rules[state.pos][0]),
+                            min(-1, state.blank_line_rules[state.pos][1]))
             state.pos += 1
             self._handle_whitespace_between_tokens(
                 state,
                 self._rule_whitespace(space_number=space_number,
-                                      enter_number=(-1, -1),
+                                      enter_number=enter_number,
                                       error_message=error_text,
-                                      error_blank=ERROR_SIZE + " after token"))
+                                      error_blank_max=ERROR_SIZE + " after token",
+                                      error_blank_min=state.blank_line_rules[state.pos-1][-1]))
             declaration_start = state.pos
             self._token.append(state.all_tokens[state.pos])
             prev_token = state.all_tokens[state.pos]
@@ -1353,13 +1787,16 @@ class JsFormatter:
             else:
                 enter_number = (-1, RULES_SET[BlankLines.Max])
 
+            enter_number = (max(enter_number[0], state.blank_line_rules[state.pos][0]),
+                            min(enter_number[1], state.blank_line_rules[state.pos][1]))
             state.pos += 1
             self._handle_whitespace_between_tokens(
                 state,
                 self._rule_whitespace(space_number=space_number,
                                       enter_number=enter_number,
                                       error_message=error_text,
-                                      error_blank=ERROR_SIZE + " after token"))
+                                      error_blank_max=ERROR_SIZE + " after token",
+                                      error_blank_min=state.blank_line_rules[state.pos-1][-1]))
             declaration_start = state.pos
             self._token.append(state.all_tokens[state.pos])
             prev_token = state.all_tokens[state.pos]
@@ -1410,13 +1847,17 @@ class JsFormatter:
             space_number, error_text = self._get_check_tokens_result(state, prev_token, current_token, where)
 
             state.continuous_indent += 1
+
+            enter_number = (max(-1, state.blank_line_rules[state.pos][0]),
+                            min(RULES_SET[BlankLines.Max], state.blank_line_rules[state.pos][1]))
             state.pos += 1
             self._handle_whitespace_between_tokens(
                 state,
                 self._rule_whitespace(space_number=space_number,
-                                      enter_number=(-1, RULES_SET[BlankLines.Max]),
+                                      enter_number=enter_number,
                                       error_message=error_text,
-                                      error_blank=ERROR_SIZE + " after token"))
+                                      error_blank_max=ERROR_SIZE + " after token",
+                                      error_blank_min=state.blank_line_rules[state.pos-1][-1]))
 
             state.continuous_indent -= 1
             declaration_start = state.pos
@@ -1534,18 +1975,22 @@ class JsFormatter:
     def _handle_bkt(self, state, space_number, rule_error_text, declaration_start, current_token,
                     max_blank_lines, where, bkt_type):
 
-        state.pos += 1
         if bkt_type == '}':
             enter_number = (-1, -1)
         else:
             enter_number = (-1, max_blank_lines)
 
+        enter_number = (max(enter_number[0], state.blank_line_rules[state.pos][0]),
+                        min(enter_number[1], state.blank_line_rules[state.pos][1]))
+
+        state.pos += 1
         self._handle_whitespace_between_tokens(
             state,
             self._rule_whitespace(space_number=space_number,
                                   enter_number=enter_number,
                                   error_message=rule_error_text,
-                                  error_blank=ERROR_SIZE + RULE_BLANK_MAX))
+                                  error_blank_max=ERROR_SIZE + RULE_BLANK_MAX,
+                                  error_blank_min=state.blank_line_rules[state.pos-1][-1]))
 
         current_token = self._get_next_token(state)
         if current_token.is_fake():
@@ -1657,21 +2102,24 @@ class JsFormatter:
     def _handle_one_liner(self, state, space_number, rule_error_text, declaration_start, current_token,
                           max_blank_lines, where):
 
+        enter_number = (max(-1, state.blank_line_rules[state.pos][0]),
+                        min(RULES_SET[BlankLines.Max], state.blank_line_rules[state.pos][1]))
         state.pos += 1
         state.indent += 1
         self._handle_whitespace_between_tokens(
             state,
             self._rule_whitespace(space_number=space_number,
-                                  enter_number=(-1, RULES_SET[BlankLines.Max]),
+                                  enter_number=enter_number,
                                   error_message=rule_error_text,
-                                  error_blank=ERROR_SIZE + RULE_BLANK_MAX))
+                                  error_blank_max=ERROR_SIZE + RULE_BLANK_MAX,
+                                  error_blank_min=state.blank_line_rules[state.pos-1][-1]))
 
         was_comma = False
         while state.pos < len(state.all_tokens):
             current_token = state.all_tokens[state.pos]
             next_token = self._get_next_token(state, False)
             if (next_token.type == Tokens.Punctuation and next_token.spec == ',' or
-                    current_token.type == Tokens.Punctuation and current_token.spec == ',') and \
+                current_token.type == Tokens.Punctuation and current_token.spec == ',') and \
                     where != Scope.FuncCall and where != Scope.FuncDeclaration and where != Scope.AsyncFunc and \
                     where.value > Scope.Do.value:
                 was_comma = True
@@ -1816,15 +2264,16 @@ class JsFormatter:
 
     def _handle_switch_bkt(self, state, space_number, rule_error_text, declaration_start, current_token,
                            max_blank_lines, where, bkt_type):
-
+        enter_number = (max(-1, state.blank_line_rules[state.pos][0]),
+                        min(-1, state.blank_line_rules[state.pos][1]))
         state.pos += 1
-        enter_number = (-1, -1)
         self._handle_whitespace_between_tokens(
             state,
             self._rule_whitespace(space_number=space_number,
                                   enter_number=enter_number,
                                   error_message=rule_error_text,
-                                  error_blank=ERROR_SIZE + RULE_BLANK_MAX))
+                                  error_blank_max=ERROR_SIZE + RULE_BLANK_MAX,
+                                  error_blank_min=state.blank_line_rules[state.pos-1][-1]))
 
         current_token = self._get_next_token(state)
         if current_token.is_fake():
@@ -1867,11 +2316,23 @@ class JsFormatter:
                     print(token.type.value, end='')
             sys.stdout = original_stdout
 
-    def print_log(self, file_name):
+    def print_log(self, file_name, state=None):
         with open("log.txt", "a") as f:
             original_stdout = sys.stdout
             sys.stdout = f
             print('##########-----------' + file_name + '-----------##########')
+
+            if state is not None:
+                for tok in range(len(self._token)):
+                    print(self._token[tok], end=' ')
+                    if self._token[tok].index is not None:
+                        print('|' + self._symbol_table[self._token[tok].index] + '|', end='  ')
+                    else:
+                        print('', end='  ')
+                    print(state.blank_line_rules[tok])
+                    if self._token[tok].type == Tokens.Enter:
+                        print('')
+                print('------------------------')
 
             print('------------------------error format------------------------')
             for tok in self._invalid_token:
