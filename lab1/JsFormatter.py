@@ -44,7 +44,7 @@ class _CurrentState:
         self.outer_scope = Scope.GeneralScope
         self.enter_number = (-1, -1)
         self.len_line = 0
-        self.symbol_table = []
+        self.blank_line_rules = []
 
     def check_blank_lines(self, start_pos):
         self.pos = start_pos
@@ -59,6 +59,8 @@ class _CurrentState:
             self._handle_punctuation()
         elif current_token.type == Tokens.Identifier:
             self._handle_identifiers(where)
+        if self.pos >= len(self.all_tokens):
+            return
         current_token = self.all_tokens[self.pos]
         if is_whitespace_token(current_token.type):
             self.blank_line_rules.append((-1, RULES_SET[BlankLines.Max], ''))
@@ -197,39 +199,6 @@ class _CurrentState:
         return ". Rule: " + main_rule + " -> " + sub_rule + " -> " + rule_name + "."
 
     def _check_what_is_next(self):
-        if self.all_tokens[self.pos].type == Tokens.Enter:
-            self.len_line = self.indent * RULES_SET[BlankLines.Indent] + \
-                            self.continuous_indent * RULES_SET[BlankLines.ContIndent]
-        if self.all_tokens[self.pos].spec is not None:
-            self.len_line += len(self.all_tokens[self.pos].spec) + 1
-        elif self.all_tokens[self.pos].index is not None:
-            self.len_line += len(self.symbol_table[self.all_tokens[self.pos].index]) + 1
-        elif self.all_tokens[self.pos].type == Tokens.StartTemplateString or self.all_tokens[self.pos].type == Tokens.EndTemplateString:
-            self.len_line += 2
-        elif not is_whitespace_token(self.all_tokens[self.pos].type):
-            self.len_line += len(self.all_tokens[self.pos].type.value) + 1
-        if self.len_line > RULES_SET[BlankLines.MaxLen]:
-            prev_pos = self._prev_non_whitespace(self.pos-1)
-            if self.all_tokens[self.pos].type == Tokens.EndTemplateString:
-                prev_pos = self._prev_non_whitespace(prev_pos-1)
-                if self.all_tokens[self.pos].type == Tokens.StartTemplateString:
-                    prev_pos = self._prev_non_whitespace(prev_pos-1)
-            # if prev_pos >= 0 and self.blank_line_rules[prev_pos][0] < 0:
-            #     self.blank_line_rules[prev_pos] = (0, RULES_SET[BlankLines.Max], 'Size of line is more than ' + str(RULES_SET[BlankLines.MaxLen]))
-            self.len_line = self.indent * RULES_SET[BlankLines.Indent] + \
-                            self.continuous_indent*RULES_SET[BlankLines.ContIndent]
-            prev_pos = self._prev_non_whitespace(prev_pos + 1)
-            while prev_pos <= self.pos:
-                if self.all_tokens[prev_pos].spec is not None:
-                    self.len_line += len(self.all_tokens[prev_pos].spec) + 1
-                elif self.all_tokens[self.pos].index is not None:
-                    self.len_line += len(self.symbol_table[self.all_tokens[prev_pos].index]) + 1
-                elif self.all_tokens[prev_pos].type == Tokens.StartTemplateString or self.all_tokens[prev_pos].type == Tokens.EndTemplateString:
-                    self.len_line += 2
-                else:
-                    self.len_line += len(self.all_tokens[prev_pos].type.value) + 1
-                prev_pos = self._next_non_whitespace(prev_pos + 1)
-
         next_pos = self._next_non_whitespace(self.pos + 1)
         if next_pos >= len(self.all_tokens):
             if len(self.blank_line_rules) == self.pos:
@@ -250,9 +219,17 @@ class _CurrentState:
                 next_next_pos = self._next_non_whitespace(next_next_pos + 1)
 
             if self.all_tokens[self.pos].type == Tokens.MultiLineComment or \
-                    self.all_tokens[self.pos].type == Tokens.SingleLineComment:
+                    self.all_tokens[self.pos].type == Tokens.SingleLineComment or \
+                    self.all_tokens[self.pos].spec == 'export':
                 prev_token = self._prev_non_whitespace(self.pos - 1)
-                enter_number = (0, 0, ERROR_SIZE + ' between comment and func')
+                if self.all_tokens[self.pos].spec == 'export':
+                    enter_number = (-1, -1, ERROR_SIZE + ' between export and func')
+                    if prev_token >= 0 and (self.all_tokens[prev_token].type == Tokens.MultiLineComment or
+                                            self.all_tokens[prev_token].type == Tokens.SingleLineComment):
+                        self.blank_line_rules[prev_token] = (0, 0, ERROR_SIZE + ' between comment and export')
+                        prev_token = self._prev_non_whitespace(prev_token - 1)
+                else:
+                    enter_number = (0, 0, ERROR_SIZE + ' between comment and func')
                 if prev_token >= 0 and self.blank_line_rules[prev_token][0] < RULES_SET[BlankLines.Func]:
                     self.blank_line_rules[prev_token] = (RULES_SET[BlankLines.Func], RULES_SET[BlankLines.Max],
                                                          ERROR_SIZE + self._error_rule_text_creation('Blank Lines',
@@ -412,11 +389,11 @@ class _CurrentState:
             self.blank_line_rules.append((-1, RULES_SET[BlankLines.Max], ''))
             self.pos += 1
 
-        if self.all_tokens[next_start].spec == 'import':
+        if next_start < len(self.all_tokens) and self.all_tokens[next_start].spec == 'import':
             self.blank_line_rules.append((0, 0, ERROR_SIZE + ' between imports'))
-        elif self.all_tokens[next_start].type == Tokens.Enter:
+        elif next_start < len(self.all_tokens) and self.all_tokens[next_start].type == Tokens.Enter:
             current_pos = self._next_non_whitespace(current_pos + 1)
-            if self.all_tokens[current_pos].spec == 'import':
+            if current_pos < len(self.all_tokens) and self.all_tokens[current_pos].spec == 'import':
                 self.blank_line_rules.append((0, 0, ERROR_SIZE + ' between imports'))
             else:
                 self.blank_line_rules.append((RULES_SET[BlankLines.Imports], RULES_SET[BlankLines.Max],
@@ -424,8 +401,8 @@ class _CurrentState:
                                                                                           'Minimum Blank Lines',
                                                                                           'After imports')))
         else:
-            current_pos = self._next_non_whitespace(current_pos + 1)
-            if self.all_tokens[current_pos].spec == 'import':
+            next_start = self._next_non_whitespace(next_start + 1)
+            if next_start < len(self.all_tokens) and self.all_tokens[next_start].spec == 'import':
                 self.blank_line_rules.append((0, 0, ERROR_SIZE + ' between imports'))
             else:
                 self.blank_line_rules.append((-1, RULES_SET[BlankLines.Max], ''))
@@ -973,8 +950,6 @@ class JsFormatter:
         self._lexer_error_list = lexer.get_error_tokens_list()
         self._symbol_table = lexer.get_symbol_table()
         state = _CurrentState()
-        state.symbol_table = self._symbol_table
-
         state.check_blank_lines(0)
         state.enter_number = (-1, RULES_SET[BlankLines.Max])
         state.pos = 0
