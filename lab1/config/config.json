@@ -1,0 +1,246 @@
+{
+  "Tabs and Indents" :
+  {
+    "Use tab character": false,
+    "Tab size" : 4,
+    "Indent" : 4,
+    "Continuation indent" : 8,
+    "Keep indents on empty lines" : true,
+    "Indent chained methods" : true,
+    "Indent all chained calls in a group" : false
+  },
+  "Spaces" :
+  {
+    "Before Parentheses" :
+    {
+      "Function declaration" : false,
+      "Function call" : false,
+      "if" : true,
+      "for" : true,
+      "while" : true,
+      "switch" : true,
+      "catch" : true,
+      "In function expression" : true,
+      "In async arrow function" : true
+    },
+    "Around operators" :
+    {
+      "Assignment" : true,
+      "Logical" : true,
+      "Equality" : true,
+      "Relational" : true,
+      "Bitwise" : true,
+      "Additive" : true,
+      "Multiplicative" : true,
+      "Shift" : true,
+      "Unary additive" : false,
+      "Arrow function" : true,
+      "Before unary 'not' (!) and '!!'" : false,
+      "After unary 'not' (!) and '!!'" : false
+    },
+    "Before Left Brace" :
+    {
+      "Function" : true,
+      "if" : true,
+      "else" :true,
+      "for" : true,
+      "while" : true,
+      "do" : true,
+      "switch" : true,
+      "try" : true,
+      "catch" : true,
+      "finally" : true,
+      "Class" : true
+    },
+    "Before Keywords" :
+    {
+      "else" : true,
+      "while" : true,
+      "catch" : true,
+      "finally" : true
+    },
+    "Within" :
+    {
+      "Index access brackets" : false,
+      "Grouping parentheses" : false,
+      "Function declaration parentheses" : false,
+      "Function call parentheses" : false,
+      "'if' parentheses" : false,
+      "'for' parentheses" : false,
+      "'while' parentheses" : false,
+      "'switch' parentheses" : false,
+      "'catch' parentheses" : false,
+      "Object literal braces" : false,
+      "ES6 import/export braces" : false,
+      "Array brackets" : false,
+      "Interpolation expressions" : false
+    },
+    "In Ternary Operator (?:)" :
+    {
+      "Before '?'" : true,
+      "After '?'" : true,
+      "Before ':'" : true,
+      "After ':'" : true
+    },
+    "Other" :
+    {
+      "Before comma" : false,
+      "After comma" : true,
+      "Before 'for' semicolon" : false,
+      "Before property name-value operator ':'" : false,
+      "After property name-value operator ':'" : true,
+      "After '...' in rest/spread" : false,
+      "Before '*' in generator" : false,
+      "After '*' in generator" : true
+    },
+    "In Flow" :
+    {
+      "Before type reference colon ':'" : false,
+      "After type reference colon ':" : true,
+      "Object literal type braces" : true,
+      "Union and intersection types" : true
+    }
+  },
+  "Wrapping and Braces" :
+  {
+    "Hard wrap at" : 120,
+    "Wrap on typing" : false,
+    "Visual guides" : "None",
+    "Keep when reformatting" :
+    {
+      "Line breaks" : true,
+      "Comment at first column" : true,
+      "Simple blocks in one line" : false,
+      "Simple methods in one line" : false
+    },
+    "Comments" :
+    {
+      "Wrap at right margin" : false,
+      "Align multiline" : false
+    },
+    "Braces placement" :
+    {
+      "In class declaration" : "End of line",
+      "In function declaration" : "End of line",
+      "In function expression" : "End of line",
+      "Other" : "End of line"
+    },
+    "Extends list" :
+    {
+      "Option" : "Do not wrap",
+      "Align when multiline" : false
+    },
+    "Extends keyword" : "Do not wrap",
+    "Function declaration parameters" :
+    {
+      "Option" : "Do not wrap",
+      "Align when multiline" : true,
+      "New line after '('" : false,
+      "Place ')' on new line" : false
+    },
+    "Function call arguments" :
+    {
+      "Option" : "Do not wrap",
+      "Take priority over call chain wrapping" : false,
+      "New line after '('" : false,
+      "Place ')' on new line" : false
+    },
+    "Chained methods calls" :
+    {
+      "Option" : "Do not wrap",
+      "Align when multiline" : false,
+      "'.' on new line" : true
+    },
+    "'if()' statement" :
+    {
+      "Force braces" : "Do not force",
+      "'else' on new line" : false,
+      "Special 'else if' treatment" : true
+    },
+    "'for()' statement" :
+    {
+      "Option" : "Do not wrap",
+      "Align when multiline" : false,
+      "New line after '('" : false,
+      "Place ')' on new line" : false,
+      "Force braces" : "Do not force"
+    },
+    "'while()' statement" :
+    {
+      "Force braces" : "Do not force"
+    },
+    "'do while()' statement" :
+    {
+      "Force braces" : "Do not force",
+      "'while' on new line" : false
+    },
+    "'switch' statement" :
+    {
+      "Indent 'case' branches" : true
+    },
+    "'try' statement" :
+    {
+      "'catch' on new line" : false,
+      "'finally' on new line" : false
+    },
+    "Binary expressions" :
+    {
+      "Option" : "Do not wrap",
+      "Align when multiline" : false,
+      "Operation sign on next line" : false,
+      "New line after '('" : false,
+      "Place ')' on new line" : false
+    },
+    "Assignment statement" :
+    {
+      "Option" : "Do not wrap",
+      "Assignment sign on next line" : false
+    },
+    "Ternary operation" :
+    {
+      "Option" : "Do not wrap",
+      "Align when multiline" : false,
+      "'?' and ':' signs on next line" : false
+    },
+    "Arrays" :
+    {
+      "Option" : "Do not wrap",
+      "Align when multiline" : false,
+      "New line after '['" : false,
+      "Place ']' on new line" : false
+    },
+    "Objects":
+    {
+      "Option" : "Chop down if long",
+      "Align" : "Do not align"
+    },
+    "Variable declarations":
+    {
+      "Option" : "Wrap if long",
+      "Align" : "Do not align"
+    },
+    "ES6 import/export":
+    {
+      "Option" : "Chop down if long",
+      "Align 'from' clauses" : false
+    }
+  },
+  "Blank Lines" :
+  {
+    "Keep Maximum Blank Lines" : 2,
+    "Minimum Blank Lines" :
+    {
+      "After imports" : 1,
+      "Around class" : 1,
+      "Around field" : 0,
+      "Around method" : 1,
+      "Around function" : 1
+    }
+  },
+  "Punctuation" :
+  {
+    "Always use semicolon to terminate statements" : true,
+    "Always use double quotes" : false,
+    "Trailing comma" : "Keep"
+  }
+}
