@@ -1,8 +1,8 @@
 import errno
 
-from ._dict_token_types import Tokens
+from .dict_token_types import Tokens
 from ._char_checks import *
-from ._token_classes import Token, WrongToken
+from .token_classes import Token, WrongToken
 
 
 class _CurrentLineState:

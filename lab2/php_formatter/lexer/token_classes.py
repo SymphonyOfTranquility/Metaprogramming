@@ -1,4 +1,4 @@
-from ._dict_token_types import Tokens
+from .dict_token_types import Tokens
 
 
 class Token:
