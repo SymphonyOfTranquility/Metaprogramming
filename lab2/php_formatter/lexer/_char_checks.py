@@ -19,7 +19,7 @@ def is_punctuation(c):
 
 
 def is_operation(c):
-    return c in "+-*/%^|&=<>!?:~."
+    return c in "+-*/%^|&=<>!?:~.\\"
 
 
 def is_comment(c1, c2):

@@ -38,6 +38,9 @@ class PHPFormatter:
         if current_token.spec == 'class':
             self._handle_class()
             return
+        if current_token.spec == 'namespace':
+            self._handle_namespace()
+            return
 
         self._token.append(self._all_tokens[self._state_pos])
         self._state_pos += 1
@@ -56,7 +59,7 @@ class PHPFormatter:
         self._token.append(new_token)
         self._symbol_table.append(new_value)
         self._invalid_token.append(WrongToken(
-            token=new_token,
+            token=current_token,
             message=error_message
         ))
 
@@ -155,7 +158,62 @@ class PHPFormatter:
         class_name = self._symbol_table[current_token.index]
         new_class_name = camel_case(class_name)
         if class_name != new_class_name:
-            self._add_new_token(current_token, new_class_name, "Incorrect snake case in func name")
+            self._add_new_token(current_token, new_class_name, "Incorrect snake case in class name")
+        else:
+            self._token.append(current_token)
+        self._state_pos += 1
+
+    def _handle_namespace(self):
+        next_token = self._next_non_whitespace(self._state_pos + 1)
+        self._token.append(self._all_tokens[self._state_pos])
+        self._state_pos += 1
+
+        if next_token.type != Tokens.Identifier:
+            return
+        while self._state_pos < len(self._all_tokens) and \
+                self._is_whitespace_token(self._all_tokens[self._state_pos].type):
+            self._token.append(self._all_tokens[self._state_pos])
+            self._state_pos += 1
+
+        normal_end = True
+
+        while self._next_non_whitespace(self._state_pos + 1).spec == '\\':
+            current_token = self._all_tokens[self._state_pos]
+            namespace = self._symbol_table[current_token.index]
+            new_namespace = camel_case(namespace)
+            if new_namespace == namespace:
+                self._token.append(current_token)
+            elif new_namespace != namespace:
+                self._add_new_token(current_token, new_namespace, "Incorrect snake case in namespace name")
+            else:
+                self._token.append(current_token)
+            self._state_pos += 1
+            while self._state_pos < len(self._all_tokens) and \
+                    self._is_whitespace_token(self._all_tokens[self._state_pos].type):
+                self._token.append(self._all_tokens[self._state_pos])
+                self._state_pos += 1
+
+            if self._state_pos >= len(self._all_tokens):
+                return
+
+            self._token.append(self._all_tokens[self._state_pos])
+            self._state_pos += 1
+            next_token = self._next_non_whitespace(self._state_pos)
+            if next_token.type != Tokens.Identifier:
+                normal_end = False
+                break
+            while self._state_pos < len(self._all_tokens) and \
+                    self._is_whitespace_token(self._all_tokens[self._state_pos].type):
+                self._token.append(self._all_tokens[self._state_pos])
+                self._state_pos += 1
+
+        if not normal_end or self._state_pos >= len(self._all_tokens):
+            return
+        current_token = self._all_tokens[self._state_pos]
+        namespace = self._symbol_table[current_token.index]
+        new_namespace = camel_case(namespace)
+        if new_namespace != namespace:
+            self._add_new_token(current_token, new_namespace, "Incorrect snake case in namespace name")
         else:
             self._token.append(current_token)
         self._state_pos += 1
