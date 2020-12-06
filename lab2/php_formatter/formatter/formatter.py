@@ -2,7 +2,7 @@ from ..lexer import Lexer
 from ..lexer.token_classes import Token, WrongToken
 from ..lexer.dict_token_types import Tokens
 
-from ._cases_creation import correct_screaming_snake_case, correct_snake_case
+from ._cases_creation import *
 
 
 class PHPFormatter:
@@ -32,6 +32,9 @@ class PHPFormatter:
         if current_token.type == Tokens.Variable:
             self._handle_variable()
             return
+        if current_token.spec == 'function':
+            self._handle_function()
+            return
 
         self._token.append(self._all_tokens[self._state_pos])
         self._state_pos += 1
@@ -41,7 +44,7 @@ class PHPFormatter:
 
     def _add_new_token(self, current_token, new_value, error_message):
         new_token = Token(
-            token_type=Tokens.Variable,
+            token_type=current_token.type,
             row=current_token.row,
             column=current_token.column,
             index=len(self._symbol_table)
@@ -60,15 +63,15 @@ class PHPFormatter:
             current_token = self._all_tokens[self._state_pos]
             variable = self._symbol_table[current_token.index]
             if current_token.type == Tokens.Variable:
-                new_variable_lower = '$' + correct_snake_case(variable[1:])
-                new_variable_upper = '$' + correct_screaming_snake_case(variable[1:])
+                new_variable_lower = '$' + snake_case(variable[1:])
+                new_variable_upper = '$' + screaming_snake_case(variable[1:])
             else:
-                new_variable_lower = correct_snake_case(variable)
-                new_variable_upper = correct_screaming_snake_case(variable)
+                new_variable_lower = snake_case(variable)
+                new_variable_upper = screaming_snake_case(variable)
             if new_variable_upper == variable:
                 self._token.append(current_token)
             elif new_variable_lower != variable:
-                self._add_new_token(current_token, new_variable_lower, "Not correct snake case")
+                self._add_new_token(current_token, new_variable_lower, "Incorrect snake case in variable name")
             else:
                 self._token.append(current_token)
             self._state_pos += 1
@@ -97,12 +100,37 @@ class PHPFormatter:
         current_token = self._all_tokens[self._state_pos]
         variable = self._symbol_table[current_token.index]
         if current_token.type == Tokens.Variable:
-            new_variable = '$' + correct_snake_case(variable[1:])
+            new_variable_lower = '$' + snake_case(variable[1:])
+            new_variable_upper = '$' + screaming_snake_case(variable[1:])
         else:
-            new_variable = correct_snake_case(variable)
+            new_variable_lower = snake_case(variable)
+            new_variable_upper = screaming_snake_case(variable)
+        if new_variable_upper == variable:
+            self._token.append(current_token)
+        elif new_variable_lower != variable:
+            self._add_new_token(current_token, new_variable_lower, "Incorrect snake case in variable name")
+        else:
+            self._token.append(current_token)
+        self._state_pos += 1
 
-        if new_variable != variable:
-            self._add_new_token(current_token, new_variable, "Not correct snake case")
+    def _handle_function(self):
+        next_token = self._next_non_whitespace(self._state_pos + 1)
+        self._token.append(self._all_tokens[self._state_pos])
+        self._state_pos += 1
+
+        if next_token.type != Tokens.Identifier:
+            return
+
+        while self._state_pos < len(self._all_tokens) and \
+                self._is_whitespace_token(self._all_tokens[self._state_pos].type):
+            self._token.append(self._all_tokens[self._state_pos])
+            self._state_pos += 1
+
+        current_token = self._all_tokens[self._state_pos]
+        func_name = self._symbol_table[current_token.index]
+        new_func_name = snake_case(func_name)
+        if func_name != new_func_name:
+            self._add_new_token(current_token, new_func_name, "Incorrect snake case in func name")
         else:
             self._token.append(current_token)
         self._state_pos += 1

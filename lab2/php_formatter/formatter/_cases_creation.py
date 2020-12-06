@@ -1,4 +1,4 @@
-def correct_snake_case(s):
+def snake_case(s):
     new_s = ''
     for i in range(len(s)):
         if (s[i]).isupper() and i != 0 and ((s[i - 1]).islower() or i + 1 < len(s) and (s[i + 1]).islower()):
@@ -7,5 +7,5 @@ def correct_snake_case(s):
     return new_s
 
 
-def correct_screaming_snake_case(s):
+def screaming_snake_case(s):
     return s.upper()
