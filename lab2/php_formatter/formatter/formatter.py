@@ -2,6 +2,8 @@ from ..lexer import Lexer
 from ..lexer.token_classes import Token, WrongToken
 from ..lexer.dict_token_types import Tokens
 
+from ._cases_creation import correct_screaming_snake_case, correct_snake_case
+
 
 class PHPFormatter:
 
@@ -34,15 +36,10 @@ class PHPFormatter:
         self._token.append(self._all_tokens[self._state_pos])
         self._state_pos += 1
 
-    def _handle_variable(self):
-        current_token = self._all_tokens[self._state_pos]
-        variable = self._symbol_table[current_token.index]
-        new_variable = '$'
-        for i in range(1, len(variable)):
-            if (variable[i]).isupper() and i != 1:
-                new_variable += '_'
-            new_variable += (variable[i]).lower()
+    def _is_whitespace_token(self, token):
+        return token == Tokens.Enter or token == Tokens.Space or token == Tokens.Tab
 
+    def _add_new_token(self, current_token, new_value, error_message):
         new_token = Token(
             token_type=Tokens.Variable,
             row=current_token.row,
@@ -51,12 +48,72 @@ class PHPFormatter:
         )
 
         self._token.append(new_token)
-        self._symbol_table.append(new_variable)
+        self._symbol_table.append(new_value)
         self._invalid_token.append(WrongToken(
             token=new_token,
-            message="Not snake_case"
+            message=error_message
         ))
+
+    def _handle_variable(self):
+        normal_end = True
+        while self._next_non_whitespace(self._state_pos + 1).spec == '->':
+            current_token = self._all_tokens[self._state_pos]
+            variable = self._symbol_table[current_token.index]
+            if current_token.type == Tokens.Variable:
+                new_variable_lower = '$' + correct_snake_case(variable[1:])
+                new_variable_upper = '$' + correct_screaming_snake_case(variable[1:])
+            else:
+                new_variable_lower = correct_snake_case(variable)
+                new_variable_upper = correct_screaming_snake_case(variable)
+            if new_variable_upper == variable:
+                self._token.append(current_token)
+            elif new_variable_lower != variable:
+                self._add_new_token(current_token, new_variable_lower, "Not correct snake case")
+            else:
+                self._token.append(current_token)
+            self._state_pos += 1
+            while self._state_pos < len(self._all_tokens) and\
+                    self._is_whitespace_token(self._all_tokens[self._state_pos].type):
+                self._token.append(self._all_tokens[self._state_pos])
+                self._state_pos += 1
+
+            if self._state_pos >= len(self._all_tokens):
+                return
+
+            self._token.append(self._all_tokens[self._state_pos])
+            self._state_pos += 1
+            next_token = self._next_non_whitespace(self._state_pos)
+            if next_token.type != Tokens.Identifier:
+                normal_end = False
+                break
+            while self._state_pos < len(self._all_tokens) and\
+                    self._is_whitespace_token(self._all_tokens[self._state_pos].type):
+                self._token.append(self._all_tokens[self._state_pos])
+                self._state_pos += 1
+
+        if not normal_end or self._next_non_whitespace(self._state_pos + 1).spec == '(' and\
+                self._all_tokens[self._state_pos].type != Tokens.Variable:
+            return
+        current_token = self._all_tokens[self._state_pos]
+        variable = self._symbol_table[current_token.index]
+        if current_token.type == Tokens.Variable:
+            new_variable = '$' + correct_snake_case(variable[1:])
+        else:
+            new_variable = correct_snake_case(variable)
+
+        if new_variable != variable:
+            self._add_new_token(current_token, new_variable, "Not correct snake case")
+        else:
+            self._token.append(current_token)
         self._state_pos += 1
+
+    def _next_non_whitespace(self, pos):
+        while pos < len(self._all_tokens) and self._is_whitespace_token(self._all_tokens[pos].type):
+            pos += 1
+        if pos >= len(self._all_tokens):
+            return Token().set_invalid()
+        else:
+            return self._all_tokens[pos]
 
     def print_all(self):
         for tok in self._token:
