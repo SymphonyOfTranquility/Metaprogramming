@@ -35,6 +35,9 @@ class PHPFormatter:
         if current_token.spec == 'function':
             self._handle_function()
             return
+        if current_token.spec == 'class':
+            self._handle_class()
+            return
 
         self._token.append(self._all_tokens[self._state_pos])
         self._state_pos += 1
@@ -131,6 +134,28 @@ class PHPFormatter:
         new_func_name = snake_case(func_name)
         if func_name != new_func_name:
             self._add_new_token(current_token, new_func_name, "Incorrect snake case in func name")
+        else:
+            self._token.append(current_token)
+        self._state_pos += 1
+
+    def _handle_class(self):
+        next_token = self._next_non_whitespace(self._state_pos + 1)
+        self._token.append(self._all_tokens[self._state_pos])
+        self._state_pos += 1
+
+        if next_token.type != Tokens.Identifier:
+            return
+
+        while self._state_pos < len(self._all_tokens) and \
+                self._is_whitespace_token(self._all_tokens[self._state_pos].type):
+            self._token.append(self._all_tokens[self._state_pos])
+            self._state_pos += 1
+
+        current_token = self._all_tokens[self._state_pos]
+        class_name = self._symbol_table[current_token.index]
+        new_class_name = camel_case(class_name)
+        if class_name != new_class_name:
+            self._add_new_token(current_token, new_class_name, "Incorrect snake case in func name")
         else:
             self._token.append(current_token)
         self._state_pos += 1
