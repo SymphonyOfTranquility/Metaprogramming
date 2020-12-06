@@ -10,6 +10,8 @@ class PHPFormatter:
     def __init__(self):
         self._token = []
         self._invalid_token = []
+        self._for_changes = []
+        self._includes = []
         self._symbol_table = []
         self._lexer_error_list = []
 
@@ -42,13 +44,17 @@ class PHPFormatter:
             self._handle_namespace()
             return
 
+        if current_token.spec == 'include':
+            self._handle_include()
+            return
+
         self._token.append(self._all_tokens[self._state_pos])
         self._state_pos += 1
 
     def _is_whitespace_token(self, token):
         return token == Tokens.Enter or token == Tokens.Space or token == Tokens.Tab
 
-    def _add_new_token(self, current_token, new_value, error_message):
+    def _add_new_token(self, current_token, new_value, error_message, format_type):
         new_token = Token(
             token_type=current_token.type,
             row=current_token.row,
@@ -60,7 +66,8 @@ class PHPFormatter:
         self._symbol_table.append(new_value)
         self._invalid_token.append(WrongToken(
             token=current_token,
-            message=error_message
+            message=error_message,
+            format_type=format_type
         ))
 
     def _handle_variable(self):
@@ -77,7 +84,7 @@ class PHPFormatter:
             if new_variable_upper == variable:
                 self._token.append(current_token)
             elif new_variable_lower != variable:
-                self._add_new_token(current_token, new_variable_lower, "Incorrect snake case in variable name")
+                self._add_new_token(current_token, new_variable_lower, "Incorrect snake case in variable name", "var")
             else:
                 self._token.append(current_token)
             self._state_pos += 1
@@ -114,7 +121,7 @@ class PHPFormatter:
         if new_variable_upper == variable:
             self._token.append(current_token)
         elif new_variable_lower != variable:
-            self._add_new_token(current_token, new_variable_lower, "Incorrect snake case in variable name")
+            self._add_new_token(current_token, new_variable_lower, "Incorrect snake case in variable name", "var")
         else:
             self._token.append(current_token)
         self._state_pos += 1
@@ -136,7 +143,7 @@ class PHPFormatter:
         func_name = self._symbol_table[current_token.index]
         new_func_name = snake_case(func_name)
         if func_name != new_func_name:
-            self._add_new_token(current_token, new_func_name, "Incorrect snake case in func name")
+            self._add_new_token(current_token, new_func_name, "Incorrect snake case in func name", "func")
         else:
             self._token.append(current_token)
         self._state_pos += 1
@@ -158,7 +165,7 @@ class PHPFormatter:
         class_name = self._symbol_table[current_token.index]
         new_class_name = camel_case(class_name)
         if class_name != new_class_name:
-            self._add_new_token(current_token, new_class_name, "Incorrect snake case in class name")
+            self._add_new_token(current_token, new_class_name, "Incorrect snake case in class name", "class")
         else:
             self._token.append(current_token)
         self._state_pos += 1
@@ -184,7 +191,7 @@ class PHPFormatter:
             if new_namespace == namespace:
                 self._token.append(current_token)
             elif new_namespace != namespace:
-                self._add_new_token(current_token, new_namespace, "Incorrect snake case in namespace name")
+                self._add_new_token(current_token, new_namespace, "Incorrect snake case in namespace name", "namespace")
             else:
                 self._token.append(current_token)
             self._state_pos += 1
@@ -213,10 +220,46 @@ class PHPFormatter:
         namespace = self._symbol_table[current_token.index]
         new_namespace = camel_case(namespace)
         if new_namespace != namespace:
-            self._add_new_token(current_token, new_namespace, "Incorrect snake case in namespace name")
+            self._add_new_token(current_token, new_namespace, "Incorrect snake case in namespace name", "namespace")
         else:
             self._token.append(current_token)
         self._state_pos += 1
+
+    def _handle_include(self):
+        next_token = self._next_non_whitespace(self._state_pos + 1)
+        self._token.append(self._all_tokens[self._state_pos])
+        self._state_pos += 1
+
+        if not next_token.type == Tokens.StringLiteral and next_token == Tokens.StartTemplateString:
+            return
+
+        while self._state_pos < len(self._all_tokens) and \
+                self._is_whitespace_token(self._all_tokens[self._state_pos].type):
+            self._token.append(self._all_tokens[self._state_pos])
+            self._state_pos += 1
+
+        current_token = self._all_tokens[self._state_pos]
+        if current_token.type == Tokens.StringLiteral:
+            self._includes.append((current_token, len(self._token)))
+            self._token.append(current_token)
+            self._state_pos += 1
+        else:
+            pos = self._state_pos
+            while pos < len(self._all_tokens) and self._all_tokens[pos].type != Tokens.EndTemplateString:
+                pos += 1
+            if pos - self._state_pos != 2:
+                self._token.append(self._all_tokens[self._state_pos])
+                self._state_pos += 1
+                return
+
+            self._includes.append((self._all_tokens[self._state_pos + 1], len(self._token) + 1))
+            while self._state_pos < len(self._all_tokens) and \
+                    self._all_tokens[self._state_pos].type != Tokens.EndTemplateString:
+                self._token.append(self._all_tokens[self._state_pos])
+                self._state_pos += 1
+
+            self._token.append(self._all_tokens[self._state_pos])
+            self._state_pos += 1
 
     def _next_non_whitespace(self, pos):
         while pos < len(self._all_tokens) and self._is_whitespace_token(self._all_tokens[pos].type):
@@ -248,8 +291,19 @@ class PHPFormatter:
         for i in range(len(self._symbol_table)):
             print(str(i) + ') ', '|' + self._symbol_table[i] + '|')
 
+        print('------------------------')
+        print(len(self._includes))
+        for tok in self._includes:
+            if tok[0].index is not None:
+                print('|' + self._symbol_table[tok[0].index] + '|')
+            else:
+                print('')
+
     def get_tokens_list(self):
         return self._token
 
     def get_symbol_table(self):
         return self._symbol_table
+
+    def get_includes(self):
+        return self._includes
