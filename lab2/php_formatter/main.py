@@ -47,10 +47,10 @@ def main():
     if len(sys.argv) == 2 and (sys.argv[1] == '-h' or sys.argv[1] == '--help'):
         print("Basic commands:")
         print("\t-h, --help\t\t\t\t: help menu")
-        print("\t-v, --verify -(p|d|f) /..\t: verify your files(as output log.txt file);")
+        print("\t-v, --verify -(p|d|f) /..\t: verify your files(as output php_verification.log file);")
         print("\t\t\t\t\t\t  /.. - path to project, directory or file")
 
-        print("\t-f, --format -(p|d|f) /..\t: format your files(as output log.txt file);")
+        print("\t-f, --format -(p|d|f) /..\t: format your files(as output php_fixing.log file);")
         print("\t\t\t\t\t\t  /.. - path to project, directory or file")
     elif len(sys.argv) == 4 and sys.argv[2] == '-p':
         _check_rec(sys.argv[3])
