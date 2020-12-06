@@ -37,10 +37,12 @@ class Token:
 
 class WrongToken:
 
-    def __init__(self, message=None, token=None, format_type=None):
+    def __init__(self, message=None, token=None, format_type=None, old_value=None, new_value=None):
         self.error_message = message
         self.token = token
         self.format_type = format_type
+        self.old_value = old_value
+        self.new_value = new_value
 
     def __str__(self):
         s = str(self.token) + ' | ' + self.error_message.ljust(50)

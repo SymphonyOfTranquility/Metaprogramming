@@ -1,3 +1,8 @@
+import sys
+import os
+import logging
+from os.path import isfile, join, splitext
+
 from ..lexer import Lexer
 from ..lexer.token_classes import Token, WrongToken
 from ..lexer.dict_token_types import Tokens
@@ -6,11 +11,18 @@ from ._cases_creation import *
 
 
 class PHPFormatter:
+    formatted_files = []
+    all_changes = []
+    old_file_names = []
+    new_file_names = []
 
     def __init__(self):
+        self.path_to_file = ''
+        self.file_name = ''
+        self.new_file_name = ''
+
         self._token = []
         self._invalid_token = []
-        self._for_changes = []
         self._includes = []
         self._symbol_table = []
         self._lexer_error_list = []
@@ -18,9 +30,14 @@ class PHPFormatter:
         self._state_pos = 0
         self._all_tokens = []
 
-    def process_php_file(self, path_to_file):
+    def process_php_file(self, path_to_file, file_name):
+        file_path = join(path_to_file, file_name)
+        self.path_to_file = path_to_file
+        self.file_name = file_name
+        self.new_file_name = file_name_case(file_name)
+
         lexer = Lexer()
-        lexer.process_php_file(path_to_file)
+        lexer.process_php_file(file_path)
         self._all_tokens = lexer.get_tokens_list()
         self._symbol_table = lexer.get_symbol_table()
         self._lexer_error_list = lexer.get_error_tokens_list()
@@ -67,7 +84,9 @@ class PHPFormatter:
         self._invalid_token.append(WrongToken(
             token=current_token,
             message=error_message,
-            format_type=format_type
+            format_type=format_type,
+            new_value=new_value,
+            old_value=self._symbol_table[current_token.index]
         ))
 
     def _handle_variable(self):
@@ -307,3 +326,72 @@ class PHPFormatter:
 
     def get_includes(self):
         return self._includes
+
+    def get_invalid_tokens_list(self):
+        return self._invalid_token
+
+    def save_to_file(self):
+        os.remove(join(self.path_to_file, self.file_name))
+
+        with open(join(self.path_to_file, self.new_file_name), 'w') as f:
+            original_stdout = sys.stdout
+            sys.stdout = f
+            for token in self._token:
+                if token.type == Tokens.StartTemplateString or token.type == Tokens.EndTemplateString:
+                    print('"', end='')
+                elif token.index is not None:
+                    print(self._symbol_table[token.index], end='')
+                elif token.spec is not None:
+                    print(token.spec, end='')
+                else:
+                    print(token.type.value, end='')
+            sys.stdout = original_stdout
+
+    def save_ver_log(self):
+        if self.file_name != self.new_file_name:
+            logging.info('----------- ' + join(self.path_to_file, self.file_name) +
+                         ' need to rename to ' + join(self.path_to_file, self.new_file_name) + ' -------------')
+        else:
+            logging.info('----------- ' + join(self.path_to_file, self.file_name) + ' -------------')
+        logging.info('Verification errors:')
+        i = 0
+        for tok in self._invalid_token:
+            if tok.token.index is not None:
+                logging.info('Id: ' + str(i) + ') ' + join(self.path_to_file, self.file_name) + ': ' +
+                             str(tok.token.row) + '|' + str(tok.token.column) + ' - Error code ( ' +
+                             str(tok.old_value) + ' ): ' + str(tok.error_message))
+            i += 1
+        logging.info('errors end\n')
+
+    def save_fix_log(self):
+        if self.file_name != self.new_file_name:
+            logging.info('----------- ' + join(self.path_to_file, self.file_name) +
+                         ' renamed to ' + join(self.path_to_file, self.new_file_name) + ' -------------')
+        else:
+            logging.info('----------- ' + join(self.path_to_file, self.file_name) + ' -------------')
+        logging.info('Format errors:')
+        i = 0
+        for tok in self._invalid_token:
+            if tok.token.index is not None:
+                logging.info('Id: ' + str(i) + ') ' + join(self.path_to_file, self.new_file_name) + ': ' +
+                             str(tok.token.row) + '|' + str(tok.token.column) + ' Change from ' +
+                             str(tok.old_value) + ' to ' + str(tok.new_value))
+
+            i += 1
+        logging.info('errors end\n')
+
+    def setup_all_changes(self):
+        for token in self._token:
+            if token.type == Tokens.Identifier:
+                value = self._symbol_table[token.index]
+                for change in PHPFormatter.all_changes:
+                    if change.format_type != 'var' and change.old_value == value:
+                        self._symbol_table[token.index] = change.new_value
+                        self._invalid_token.append(WrongToken(
+                            token=token,
+                            message=change.error_message,
+                            format_type=change.format_type,
+                            old_value=change.old_value,
+                            new_value=change.new_value
+                        ))
+                        break
