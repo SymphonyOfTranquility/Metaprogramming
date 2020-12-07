@@ -145,7 +145,398 @@ class PHPFormatter:
             self._token.append(current_token)
         self._state_pos += 1
 
+    def _get_list_of_params(self):
+        pos = self._state_pos + 1
+        while pos < len(self._all_tokens) and self._is_whitespace_token(self._all_tokens[pos].type):
+            pos += 1
+        if pos >= len(self._all_tokens) or self._all_tokens[pos].type != Tokens.Identifier:
+            return []
+
+        pos += 1
+        while pos < len(self._all_tokens) and self._is_whitespace_token(self._all_tokens[pos].type):
+            pos += 1
+
+        if pos >= len(self._all_tokens) or self._all_tokens[pos].spec != '(':
+            return []
+
+        params = []
+        pos += 1
+        while pos < len(self._all_tokens) and self._all_tokens[pos].spec != ')':
+            while pos < len(self._all_tokens) and self._is_whitespace_token(self._all_tokens[pos].type):
+                pos += 1
+            if self._all_tokens[pos].type == Tokens.Variable:
+                params.append(snake_case(self._symbol_table[self._all_tokens[pos].index]))
+            pos += 1
+            while pos < len(self._all_tokens) and self._all_tokens[pos].spec != ')' and \
+                    self._all_tokens[pos].spec != ',':
+                pos += 1
+            if pos < len(self._all_tokens) and self._all_tokens[pos].spec != ')':
+                pos += 1
+        return params
+
+    def _default_info_of_func_comment(self, s_indent):
+        next_token = self._next_non_whitespace(self._state_pos + 1)
+        if next_token.type != Tokens.Identifier:
+            func_name = '<NoNameFunc>'
+        else:
+            func_name = snake_case(self._symbol_table[next_token.index])
+        empty_line = s_indent + ' *'
+        comment = '/**\n'
+        comment += empty_line + ' ' + func_name + '\n'
+        comment += empty_line + '\n'
+        prev_token = self._prev_non_whitespace(self._state_pos - 1)
+        if prev_token.spec == 'private' or prev_token.spec == 'protected':
+            comment += empty_line + ' @access ' + prev_token.spec + '\n'
+        else:
+            comment += empty_line + ' @access public\n'
+        comment += empty_line + ' @author Firstname Lastname\n'
+        comment += empty_line + ' @global var_type var_name\n'
+        params = self._get_list_of_params()
+        for param in params:
+            comment += empty_line + ' @param var_type ' + param + ' description\n'
+        comment += empty_line + ' @return return_type\n'
+        comment += empty_line + '/'
+        return comment
+
+    def _parse_func_comment(self, comment_value, s_indent, type_func='public'):
+        new_comment = '/**\n'
+
+        def _parse_next_char(pos, answer, stage, params, ind):
+            while comment_value[pos] == ' ' or comment_value[pos] == '\t':
+                pos += 1
+            to_add = s_indent + ' *'
+            if comment_value[pos] == '*':
+                pos += 1
+
+            while comment_value[pos] == ' ' or comment_value[pos] == '\t':
+                pos += 1
+
+            if stage == 1:
+                to_add += ' '
+                next_token = self._next_non_whitespace(self._state_pos + 1)
+                if next_token.type != Tokens.Identifier:
+                    class_name = '<NoNameClass>'
+                else:
+                    class_name = self._symbol_table[next_token.index]
+                word = ''
+                prev_pos = pos
+                while not is_whitespace(comment_value[pos]) and pos < len(comment_value) - 2:
+                    word += comment_value[pos]
+                    pos += 1
+                to_add += snake_case(class_name)
+                if word == '@return' or word == '@param' or word == '@access' or word == '@author' or word == '@global' or pos >= len(comment_value) - 2:
+                    to_add += '\n'
+                    pos -= len(word)
+                    pos -= 1
+                elif prev_pos == pos:
+                    to_add = ''
+                    stage -= 1
+                else:
+                    if word != class_name:
+                        pos = prev_pos
+                        to_add += ' '
+                    while comment_value[pos] != '\n' and pos < len(comment_value) - 2:
+                        to_add += comment_value[pos]
+                        pos += 1
+                    to_add += '\n'
+                pos += 1
+            elif stage == 2:
+                word = ''
+                prev_pos = pos
+                while not is_whitespace(comment_value[pos]) and pos < len(comment_value) - 2:
+                    word += comment_value[pos]
+                    pos += 1
+                if word == '@return' or word == '@param' or word == '@access' or word == '@author' or word == '@global' or prev_pos == pos \
+                        or pos >= len(comment_value) - 2:
+                    to_add += '\n'
+                    pos -= len(word)
+                    pos -= 1
+                else:
+                    to_add += ' '
+
+                    pos = prev_pos
+                    while comment_value[pos] != '\n' and pos < len(comment_value) - 2:
+                        to_add += comment_value[pos]
+                        pos += 1
+
+                    stage -= 1
+                    to_add += '\n'
+                pos += 1
+            elif stage == 3:
+                word = ''
+                prev_pos = pos
+                while not is_whitespace(comment_value[pos]) and pos < len(comment_value) - 2:
+                    word += comment_value[pos]
+                    pos += 1
+                if word == '@return' or word == '@param' or word == '@author' or word == '@global' or pos >= len(comment_value) - 2:
+                    to_add += ' @access ' + type_func + '\n'
+                    pos -= len(word)
+                    pos -= 1
+                elif prev_pos == pos:
+                    to_add = ''
+                    stage -= 1
+                else:
+                    to_add += ' @access ' + type_func + '\n'
+                    while comment_value[pos] != '\n' and pos < len(comment_value) - 2:
+                        pos += 1
+
+                pos += 1
+            elif stage == 4:
+                word = ''
+                prev_pos = pos
+                while not is_whitespace(comment_value[pos]) and pos < len(comment_value) - 2:
+                    word += comment_value[pos]
+                    pos += 1
+                if word == '@return' or word == '@param' or word == '@global' or pos >= len(comment_value) - 2:
+                    to_add += ' @author Firstname Lastname\n'
+                    pos -= len(word)
+                    pos -= 1
+                elif prev_pos == pos:
+                    to_add = ''
+                    stage -= 1
+                else:
+                    to_add += ' @author'
+                    if word != '@author':
+                        pos = prev_pos
+                        to_add += ' '
+                    while comment_value[pos] != '\n' and pos < len(comment_value) - 2:
+                        to_add += comment_value[pos]
+                        pos += 1
+
+                    to_add += '\n'
+
+                pos += 1
+            elif stage == 5:
+                word = ''
+                prev_pos = pos
+                while not is_whitespace(comment_value[pos]) and pos < len(comment_value) - 2:
+                    word += comment_value[pos]
+                    pos += 1
+                if word == '@return' or word == '@param' or pos >= len(comment_value) - 2:
+                    to_add += ' @global object_type object_name\n'
+                    pos -= len(word)
+                    pos -= 1
+                elif prev_pos == pos:
+                    to_add = ''
+                    stage -= 1
+                else:
+                    to_add += ' @global'
+                    if word != '@global':
+                        pos = prev_pos
+                        to_add += ' '
+                    while comment_value[pos] != '\n' and pos < len(comment_value) - 2:
+                        to_add += comment_value[pos]
+                        pos += 1
+                    to_add += '\n'
+
+                pos += 1
+            elif stage == 6:
+                if ind == len(params):
+                    to_add = ''
+                else:
+                    stage -= 1
+                    word = ''
+                    prev_pos = pos
+                    startup_pos = pos
+                    while not is_whitespace(comment_value[pos]) and pos < len(comment_value) - 2:
+                        word += comment_value[pos]
+                        pos += 1
+                    if word == '@return' or pos >= len(comment_value) - 2:
+                        to_add += ' @param var_type ' + params[ind] + ' description\n'
+                        pos -= len(word)
+                        pos -= 1
+                    elif prev_pos == pos:
+                        to_add = ''
+                        stage -= 1
+                    else:
+                        to_add += ' @param '
+                        if word != '@param':
+                            pos = prev_pos
+                        pos += 1
+                        word = ''
+                        while pos < len(comment_value) - 2 and is_whitespace(comment_value[pos]):
+                            pos += 1
+                        while pos < len(comment_value) - 2 and not is_whitespace(comment_value[pos]):
+                            word += comment_value[pos]
+                            pos += 1
+                        while pos < len(comment_value) - 2 and is_whitespace(comment_value[pos]):
+                            pos += 1
+                        new_add = word + ' '
+                        word = ''
+                        while pos < len(comment_value) - 2 and not is_whitespace(comment_value[pos]):
+                            word += comment_value[pos]
+                            pos += 1
+
+                        revert = False
+                        if word != params[ind]:
+                            for i in range(ind+1, len(params)):
+                                if params[i] == word:
+                                    revert = True
+                                    break
+                            if not revert:
+                                new_add += params[ind] + ' ' + word
+                            else:
+                                new_add = 'var_type ' + params[ind] + ' '
+                        else:
+                            new_add += params[ind]
+                        if not revert and comment_value[pos] != ' ':
+                            new_add += ' '
+                        prev_pos = pos
+                        while not revert and comment_value[pos] != '\n' and pos < len(comment_value) - 2:
+                            new_add += comment_value[pos]
+                            pos += 1
+                        if pos == prev_pos or revert:
+                            new_add += 'description'
+                            pos = startup_pos-1
+                        new_add += '\n'
+                        to_add += new_add
+                    ind += 1
+                    pos += 1
+
+            elif stage == 7:
+                word = ''
+                prev_pos = pos
+                while not is_whitespace(comment_value[pos]) and pos < len(comment_value) - 2:
+                    word += comment_value[pos]
+                    pos += 1
+                if pos >= len(comment_value) - 2:
+                    to_add += ' @return return_type\n'
+                    pos -= len(word)
+                    pos -= 1
+                elif prev_pos == pos:
+                    to_add = ''
+                    stage -= 1
+                else:
+                    to_add += ' @return'
+                    if word != '@return':
+                        pos = prev_pos
+                        to_add += ' '
+                    while comment_value[pos] != '\n' and pos < len(comment_value) - 2:
+                        to_add += comment_value[pos]
+                        pos += 1
+                    to_add += '\n'
+
+                pos += 1
+            else:
+                to_add += '/'
+                pos = len(comment_value)
+
+            stage += 1
+            return pos, answer + to_add, stage, ind
+
+        params = self._get_list_of_params()
+        state_pos = 2
+        stage_n = 1
+        ind = 0
+        if comment_value[state_pos] == '*' and comment_value[state_pos + 1] == '\n':
+            state_pos += 2
+        while state_pos < len(comment_value):
+            state_pos, new_comment, stage_n, ind = _parse_next_char(state_pos, new_comment, stage_n, params, ind)
+
+        return new_comment
+
+    def _check_func_comment(self):
+        pos = self._state_pos - 1
+        prev_token = self._prev_non_whitespace(pos)
+        type_func = 'public'
+        while prev_token is not None and (prev_token.spec == 'static' or prev_token.spec == 'private' or\
+                prev_token.spec == 'protected' or prev_token.spec == 'public'):
+            while pos >= 0 and self._is_whitespace_token(self._all_tokens[pos].type) and \
+                    self._all_tokens[pos].type != Tokens.Enter:
+                pos -= 1
+            if prev_token.spec != 'static':
+                type_func = prev_token.spec
+            prev_token = self._prev_non_whitespace(pos - 1)
+            pos -= 1
+
+        start_pos = pos + 1
+        indent = []
+        enter_here_exists = False
+        while pos >= 0 and self._is_whitespace_token(self._all_tokens[pos].type) and \
+                self._all_tokens[pos].type != Tokens.Enter:
+            indent.append(self._all_tokens[pos])
+            pos -= 1
+        if pos >= 0 and self._all_tokens[pos].type == Tokens.Enter:
+            enter_here_exists = True
+        while pos >= 0 and self._is_whitespace_token(self._all_tokens[pos].type):
+            pos -= 1
+
+        if not enter_here_exists:
+            indent = []
+        create_comment = False
+        if pos < 0 or self._all_tokens[pos].type != Tokens.Enter and self._all_tokens[pos].type != Tokens.MultiLineComment:
+            create_comment = True
+        elif pos >= 0 and self._all_tokens[pos].type == Tokens.Enter:
+            ind_pos = pos
+            while pos >= 0 and self._is_whitespace_token(self._all_tokens[pos].type):
+                pos -= 1
+            if pos < 0 or self._all_tokens[pos].type != Tokens.MultiLineComment:
+                pos = ind_pos
+                create_comment = True
+
+        comment_pos = max(pos, 0)
+        add_enter = False
+        if pos >= 0 and self._all_tokens[pos].type == Tokens.MultiLineComment:
+            pos -= 1
+            while pos >= 0 and self._is_whitespace_token(self._all_tokens[pos].type) and\
+                    self._all_tokens[pos].type != Tokens.Enter:
+                pos -= 1
+            if pos >= 0 and self._all_tokens[pos].type != Tokens.Enter:
+                add_enter = True
+
+        for i in range(pos, self._state_pos - 1):
+            self._token.pop()
+
+        if (add_enter or create_comment) and pos != -1:
+            self._token.append(Token(
+                token_type=Tokens.Enter,
+                row=self._all_tokens[max(pos, 0)].row,
+                column=self._all_tokens[max(pos, 0)].column + 1
+            ))
+        self._token.extend(indent)
+        if create_comment:
+            comment_token = Token(
+                token_type=Tokens.MultiLineComment,
+                row=self._all_tokens[max(pos, 0)].row,
+                column=self._all_tokens[max(pos, 0)].column + 1,
+                index=len(self._symbol_table)
+            )
+            comment_value = '/** */'
+            self._symbol_table.append(comment_value)
+            self._token.append(comment_token)
+        else:
+            comment_token = self._all_tokens[comment_pos]
+            comment_value = self._symbol_table[comment_token.index]
+            self._token.append(comment_token)
+
+        string_indent = ''
+        for token in indent:
+            string_indent += token.type.value
+            print(token.type)
+        self._token.append(Token(
+            token_type=Tokens.Enter,
+            row=self._all_tokens[max(pos, 0)].row,
+            column=self._all_tokens[max(pos, 0)].column + 1
+        ))
+        self._token.extend(indent)
+        for i in range(start_pos, self._state_pos):
+            self._token.append(self._all_tokens[i])
+
+        parsed_func_comment = self._parse_func_comment(comment_value, string_indent, type_func)
+        if parsed_func_comment != comment_value:
+            self._symbol_table[comment_token.index] = parsed_func_comment
+            self._invalid_token.append(WrongToken(
+                token=comment_token,
+                format_type="comment",
+                old_value=comment_value,
+                new_value=parsed_func_comment
+            ))
+
     def _handle_function(self):
+        prev_token = self._prev_non_whitespace(self._state_pos - 1)
+
+        self._check_func_comment()
+
         next_token = self._next_non_whitespace(self._state_pos + 1)
         self._token.append(self._all_tokens[self._state_pos])
         self._state_pos += 1
@@ -219,7 +610,7 @@ class PHPFormatter:
         comment += empty_line + '/'
         return comment
 
-    def _create_class_comment(self):
+    def _create_comment(self, func_name):
         pos = self._state_pos - 1
         indent = []
         while pos >= 0 and self._is_whitespace_token(self._all_tokens[pos].type) and \
@@ -246,7 +637,7 @@ class PHPFormatter:
         for token in indent:
             string_indent += token.type.value
 
-        comment_value = self._default_info_of_class_comment(string_indent)
+        comment_value = func_name(string_indent)
         self._symbol_table.append(comment_value)
         self._token.append(comment)
         self._token.append(Token(
@@ -439,8 +830,6 @@ class PHPFormatter:
                 row=self._all_tokens[pos].row,
                 column=self._all_tokens[pos].column + 1
             ))
-        print(new_indent)
-        print(indent)
         if len(new_indent) > len(indent):
             indent = new_indent
 
@@ -480,7 +869,7 @@ class PHPFormatter:
     def _handle_class(self):
         prev_token = self._prev_non_whitespace(self._state_pos - 1)
         if prev_token is None or prev_token.type != Tokens.MultiLineComment:
-            self._create_class_comment()
+            self._create_comment(self._default_info_of_class_comment)
         else:
             self._check_class_comment()
 
