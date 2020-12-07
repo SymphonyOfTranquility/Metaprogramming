@@ -60,7 +60,8 @@ class PHPFormatter:
         if current_token.spec == 'namespace':
             self._handle_namespace()
             return
-
+        if current_token.spec == 'define':
+            self._handle_constants()
         if current_token.spec == 'include':
             self._handle_include()
             return
@@ -91,19 +92,17 @@ class PHPFormatter:
 
     def _handle_variable(self):
         normal_end = True
-        while self._next_non_whitespace(self._state_pos + 1).spec == '->':
+        next_token = self._next_non_whitespace(self._state_pos + 1)
+        while next_token is not None and next_token.spec == '->':
             current_token = self._all_tokens[self._state_pos]
             variable = self._symbol_table[current_token.index]
             if current_token.type == Tokens.Variable:
-                new_variable_lower = '$' + snake_case(variable[1:])
-                new_variable_upper = '$' + screaming_snake_case(variable[1:])
+                new_variable = '$' + snake_case(variable[1:])
             else:
-                new_variable_lower = snake_case(variable)
-                new_variable_upper = screaming_snake_case(variable)
-            if new_variable_upper == variable:
-                self._token.append(current_token)
-            elif new_variable_lower != variable:
-                self._add_new_token(current_token, new_variable_lower, "Incorrect snake case in variable name", "var")
+                new_variable = snake_case(variable)
+
+            if new_variable != variable:
+                self._add_new_token(current_token, new_variable, "Incorrect snake case in variable name", "var")
             else:
                 self._token.append(current_token)
             self._state_pos += 1
@@ -126,21 +125,20 @@ class PHPFormatter:
                 self._token.append(self._all_tokens[self._state_pos])
                 self._state_pos += 1
 
-        if not normal_end or self._next_non_whitespace(self._state_pos + 1).spec == '(' and\
+            next_token = self._next_non_whitespace(self._state_pos + 1)
+
+        if not normal_end or next_token is not None and next_token.spec == '(' and\
                 self._all_tokens[self._state_pos].type != Tokens.Variable:
             return
         current_token = self._all_tokens[self._state_pos]
         variable = self._symbol_table[current_token.index]
         if current_token.type == Tokens.Variable:
-            new_variable_lower = '$' + snake_case(variable[1:])
-            new_variable_upper = '$' + screaming_snake_case(variable[1:])
+            new_variable = '$' + snake_case(variable[1:])
         else:
-            new_variable_lower = snake_case(variable)
-            new_variable_upper = screaming_snake_case(variable)
-        if new_variable_upper == variable:
-            self._token.append(current_token)
-        elif new_variable_lower != variable:
-            self._add_new_token(current_token, new_variable_lower, "Incorrect snake case in variable name", "var")
+            new_variable = snake_case(variable)
+
+        if new_variable != variable:
+            self._add_new_token(current_token, new_variable, "Incorrect snake case in variable name", "var")
         else:
             self._token.append(current_token)
         self._state_pos += 1
@@ -163,6 +161,42 @@ class PHPFormatter:
         new_func_name = snake_case(func_name)
         if func_name != new_func_name:
             self._add_new_token(current_token, new_func_name, "Incorrect snake case in func name", "func")
+        else:
+            self._token.append(current_token)
+        self._state_pos += 1
+
+    def _handle_constants(self):
+        next_token = self._next_non_whitespace(self._state_pos + 1)
+        self._token.append(self._all_tokens[self._state_pos])
+        self._state_pos += 1
+
+        if next_token.spec != '(':
+            return
+
+        while self._state_pos < len(self._all_tokens) and \
+                self._is_whitespace_token(self._all_tokens[self._state_pos].type):
+            self._token.append(self._all_tokens[self._state_pos])
+            self._state_pos += 1
+
+        self._token.append(self._all_tokens[self._state_pos])
+        self._state_pos += 1
+
+        while self._state_pos < len(self._all_tokens) and \
+                self._is_whitespace_token(self._all_tokens[self._state_pos].type):
+            self._token.append(self._all_tokens[self._state_pos])
+            self._state_pos += 1
+
+        current_token = self._all_tokens[self._state_pos]
+        if current_token.type != Tokens.StringLiteral:
+            self._token.append(current_token)
+            self._state_pos += 1
+            return
+
+        const_name = self._symbol_table[current_token.index]
+        new_const = screaming_snake_case(const_name)
+        if const_name != new_const:
+            self._add_new_token(current_token, new_const,
+                                "Incorrect screaming snake case in const name", "const")
         else:
             self._token.append(current_token)
         self._state_pos += 1
@@ -385,6 +419,16 @@ class PHPFormatter:
             if token.type == Tokens.Identifier:
                 value = self._symbol_table[token.index]
                 for change in PHPFormatter.all_changes:
+                    if change.format_type == 'const' and change.old_value[1:-1] == value:
+                        self._symbol_table[token.index] = change.new_value[1:-1]
+                        self._invalid_token.append(WrongToken(
+                            token=token,
+                            message=change.error_message,
+                            format_type=change.format_type,
+                            old_value=change.old_value[1:-1],
+                            new_value=change.new_value[1:-1]
+                        ))
+                        break
                     if change.format_type != 'var' and change.old_value == value:
                         self._symbol_table[token.index] = change.new_value
                         self._invalid_token.append(WrongToken(

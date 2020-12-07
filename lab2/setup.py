@@ -7,7 +7,7 @@ classifiers = [
 
 setup(
     name="symphony_of_tranquility_php_formatter",
-    version="0.0.1",
+    version="0.0.3",
     author="SymphonyOfTranquility",
     author_email="symphony.of.tranquility@gmail.com",
     description="Php verifier and formatter",

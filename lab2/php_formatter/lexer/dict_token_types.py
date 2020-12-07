@@ -17,7 +17,7 @@ class Tokens(Enum):
                'include_once', 'instanceof', 'insteadof', 'interface', 'isset', 'list',	'namespace', 'new', 'or',
                'print', 'private', 'protected', 'public', 'require', 'require_once', 'return', 'static', 'switch',
                'throw', 'trait', 'try', 'unset', 'use', 'var', 'while', 'xor', 'yield', 'from',
-
+               'define',
                'int', 'float', 'bool', 'string', 'void', 'iterable', 'object', 'resource', 'mixed', 'numeric',
 
                'Directory', 'stdClass', '__PHP_Incomplete_Class', 'Exception', 'ErrorException', 'php_user_filter',
