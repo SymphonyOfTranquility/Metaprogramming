@@ -6,6 +6,7 @@ from os.path import isfile, join, splitext
 from ..lexer import Lexer
 from ..lexer.token_classes import Token, WrongToken
 from ..lexer.dict_token_types import Tokens
+from ..lexer._char_checks import is_word, is_whitespace
 
 from ._cases_creation import *
 
@@ -62,6 +63,7 @@ class PHPFormatter:
             return
         if current_token.spec == 'define':
             self._handle_constants()
+            return
         if current_token.spec == 'include':
             self._handle_include()
             return
@@ -201,7 +203,287 @@ class PHPFormatter:
             self._token.append(current_token)
         self._state_pos += 1
 
+    def _default_info_of_class_comment(self, s_indent):
+        next_token = self._next_non_whitespace(self._state_pos + 1)
+        if next_token.type != Tokens.Identifier:
+            class_name = '<NoNameClass>'
+        else:
+            class_name = camel_case(self._symbol_table[next_token.index])
+        empty_line = s_indent + ' *'
+        comment = '/**\n'
+        comment += empty_line + ' ' + class_name + '\n'
+        comment += empty_line + '\n'
+        comment += empty_line + ' @author Firstname Lastname\n'
+        comment += empty_line + ' @global object_type object_name\n'
+        comment += empty_line + ' @package package_name\n'
+        comment += empty_line + '/'
+        return comment
+
+    def _create_class_comment(self):
+        pos = self._state_pos - 1
+        indent = []
+        while pos >= 0 and self._is_whitespace_token(self._all_tokens[pos].type) and \
+                self._all_tokens[pos].type != Tokens.Enter:
+            indent.append(self._all_tokens[pos])
+            pos -= 1
+        if pos >= 0 and self._all_tokens[pos].type != Tokens.Enter:
+            indent = []
+            pos = self._state_pos - 1
+            while pos >= 0 and self._is_whitespace_token(self._all_tokens[pos].type):
+                self._token.pop()
+                pos -= 1
+            self._token.append(Token(
+                token_type=Tokens.Enter,
+                row=self._all_tokens[pos].row,
+                column=self._all_tokens[pos].column + 1
+            ))
+        comment = Token(token_type=Tokens.MultiLineComment,
+                        row=self._all_tokens[self._state_pos].row,
+                        column=self._all_tokens[self._state_pos].column,
+                        index=len(self._symbol_table))
+
+        string_indent = ''
+        for token in indent:
+            string_indent += token.type.value
+
+        comment_value = self._default_info_of_class_comment(string_indent)
+        self._symbol_table.append(comment_value)
+        self._token.append(comment)
+        self._token.append(Token(
+            token_type=Tokens.Enter,
+            row=self._all_tokens[pos].row,
+            column=self._all_tokens[pos].column + 1
+        ))
+        self._token.extend(indent)
+
+    def _parse_class_comment(self, comment_value, s_indent):
+        new_comment = '/**\n'
+
+        def _parse_next_char(pos, answer, stage):
+            while comment_value[pos] == ' ' or comment_value[pos] == '\t':
+                pos += 1
+            to_add = s_indent + ' *'
+            if comment_value[pos] == '*':
+                pos += 1
+
+            while comment_value[pos] == ' ' or comment_value[pos] == '\t':
+                pos += 1
+
+            if stage == 1:
+                to_add += ' '
+                next_token = self._next_non_whitespace(self._state_pos + 1)
+                if next_token.type != Tokens.Identifier:
+                    class_name = '<NoNameClass>'
+                else:
+                    class_name = self._symbol_table[next_token.index]
+                word = ''
+                prev_pos = pos
+                while not is_whitespace(comment_value[pos]) and pos < len(comment_value) - 2:
+                    word += comment_value[pos]
+                    pos += 1
+                to_add += camel_case(class_name)
+                if word == '@author' or word == '@global' or word == '@package' or pos >= len(comment_value) - 2:
+                    to_add += '\n'
+                    pos -= len(word)
+                    pos -= 1
+                elif prev_pos == pos:
+                    to_add = ''
+                    stage -= 1
+                else:
+                    if word != class_name:
+                        pos = prev_pos
+                        to_add += ' '
+                    while comment_value[pos] != '\n' and pos < len(comment_value) - 2:
+                        to_add += comment_value[pos]
+                        pos += 1
+                    to_add += '\n'
+                pos += 1
+            elif stage == 2:
+                word = ''
+                prev_pos = pos
+                while not is_whitespace(comment_value[pos]) and pos < len(comment_value) - 2:
+                    word += comment_value[pos]
+                    pos += 1
+                if word == '@author' or word == '@global' or word == '@package' or prev_pos == pos \
+                        or pos >= len(comment_value) - 2:
+                    to_add += '\n'
+                    pos -= len(word)
+                    pos -= 1
+                else:
+                    to_add += ' '
+
+                    pos = prev_pos
+                    while comment_value[pos] != '\n' and pos < len(comment_value) - 2:
+                        to_add += comment_value[pos]
+                        pos += 1
+
+                    stage -= 1
+                    to_add += '\n'
+                pos += 1
+            elif stage == 3:
+                word = ''
+                prev_pos = pos
+                while not is_whitespace(comment_value[pos]) and pos < len(comment_value) - 2:
+                    word += comment_value[pos]
+                    pos += 1
+                if word == '@global' or word == '@package' or pos >= len(comment_value) - 2:
+                    to_add += ' @author Firstname Lastname\n'
+                    pos -= len(word)
+                    pos -= 1
+                elif prev_pos == pos:
+                    to_add = ''
+                    stage -= 1
+                else:
+                    to_add += ' @author'
+                    if word != '@author':
+                        pos = prev_pos
+                        to_add += ' '
+                    while comment_value[pos] != '\n' and pos < len(comment_value) - 2:
+                        to_add += comment_value[pos]
+                        pos += 1
+
+                    to_add += '\n'
+
+                pos += 1
+            elif stage == 4:
+                word = ''
+                prev_pos = pos
+                while not is_whitespace(comment_value[pos]) and pos < len(comment_value) - 2:
+                    word += comment_value[pos]
+                    pos += 1
+                if word == '@package' or pos >= len(comment_value) - 2:
+                    to_add += ' @global object_type object_name\n'
+                    pos -= len(word)
+                    pos -= 1
+                elif prev_pos == pos:
+                    to_add = ''
+                    stage -= 1
+                else:
+                    to_add += ' @global'
+                    if word != '@global':
+                        pos = prev_pos
+                        to_add += ' '
+                    while comment_value[pos] != '\n' and pos < len(comment_value) - 2:
+                        to_add += comment_value[pos]
+                        pos += 1
+                    to_add += '\n'
+
+                pos += 1
+            elif stage == 5:
+                word = ''
+                prev_pos = pos
+                while not is_whitespace(comment_value[pos]) and pos < len(comment_value) - 2:
+                    word += comment_value[pos]
+                    pos += 1
+                if pos >= len(comment_value) - 2:
+                    to_add += ' @package package_name\n'
+                    pos -= 1
+                elif prev_pos == pos:
+                    to_add = ''
+                    stage -= 1
+                else:
+                    to_add += ' @package'
+                    if word != '@package':
+                        pos = prev_pos
+                        to_add += ' '
+                    while comment_value[pos] != '\n' and pos < len(comment_value) - 2:
+                        to_add += comment_value[pos]
+                        pos += 1
+
+                    to_add += '\n'
+                pos += 1
+            else:
+                to_add += '/'
+                pos = len(comment_value)
+            stage += 1
+            return pos, answer + to_add, stage
+
+        state_pos = 2
+        stage_n = 1
+        if comment_value[state_pos] == '*' and comment_value[state_pos + 1] == '\n':
+            state_pos += 2
+        while state_pos < len(comment_value):
+            state_pos, new_comment, stage_n = _parse_next_char(state_pos, new_comment, stage_n)
+
+        return new_comment
+
+    def _check_class_comment(self):
+        pos = self._state_pos - 1
+        indent = []
+        while pos >= 0 and self._is_whitespace_token(self._all_tokens[pos].type) and \
+                self._all_tokens[pos].type != Tokens.Enter:
+            indent.append(self._all_tokens[pos])
+            pos -= 1
+
+        if self._all_tokens[pos].type != Tokens.Enter:
+            indent = []
+        if pos >= 0 and self._is_whitespace_token(self._all_tokens[pos].type):
+            pos -= 1
+
+        comment_pos = pos
+        pos -= 1
+        new_indent = []
+        while pos >= 0 and self._is_whitespace_token(self._all_tokens[pos].type) and \
+                self._all_tokens[pos].type != Tokens.Enter:
+            new_indent.append(self._all_tokens[pos])
+            pos -= 1
+        if self._all_tokens[pos].type != Tokens.Enter:
+            new_indent = []
+        was_here = False
+        if pos >= 0 and self._is_whitespace_token(self._all_tokens[pos].type):
+            pos -= 1
+            was_here = True
+        if was_here:
+            self._token.append(Token(
+                token_type=Tokens.Enter,
+                row=self._all_tokens[pos].row,
+                column=self._all_tokens[pos].column + 1
+            ))
+        print(new_indent)
+        print(indent)
+        if len(new_indent) > len(indent):
+            indent = new_indent
+
+        for i in range(pos, self._state_pos-1):
+            self._token.pop()
+
+        self._token.extend(indent)
+        self._token.append(self._all_tokens[comment_pos])
+
+        string_indent = ''
+        for token in indent:
+            string_indent += token.type.value
+
+        pos = self._state_pos - 1
+        while pos >= 0 and self._is_whitespace_token(self._all_tokens[pos].type):
+            pos -= 1
+
+        comment = self._all_tokens[pos]
+        comment_value = self._symbol_table[comment.index]
+        parsed_class_comment = self._parse_class_comment(comment_value, string_indent)
+        if parsed_class_comment != comment_value:
+            self._symbol_table[comment.index] = parsed_class_comment
+            self._invalid_token.append(WrongToken(
+                token=comment,
+                format_type="comment",
+                old_value=comment_value,
+                new_value=parsed_class_comment
+            ))
+
+        self._token.append(Token(
+            token_type=Tokens.Enter,
+            row=self._all_tokens[pos].row,
+            column=self._all_tokens[pos].column + 1
+        ))
+        self._token.extend(indent)
+
     def _handle_class(self):
+        prev_token = self._prev_non_whitespace(self._state_pos - 1)
+        if prev_token is None or prev_token.type != Tokens.MultiLineComment:
+            self._create_class_comment()
+        else:
+            self._check_class_comment()
+
         next_token = self._next_non_whitespace(self._state_pos + 1)
         self._token.append(self._all_tokens[self._state_pos])
         self._state_pos += 1
@@ -318,6 +600,14 @@ class PHPFormatter:
         while pos < len(self._all_tokens) and self._is_whitespace_token(self._all_tokens[pos].type):
             pos += 1
         if pos >= len(self._all_tokens):
+            return Token().set_invalid()
+        else:
+            return self._all_tokens[pos]
+
+    def _prev_non_whitespace(self, pos):
+        while pos >= 0 and self._is_whitespace_token(self._all_tokens[pos].type):
+            pos -= 1
+        if pos < 0:
             return Token().set_invalid()
         else:
             return self._all_tokens[pos]
